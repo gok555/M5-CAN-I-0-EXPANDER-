@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>AnaCAN v2</title>
+<title>I/O CAN</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700;900&display=swap');
 
@@ -334,13 +334,23 @@ html, body {
   padding: 5px; font-size: 0.62rem; margin-top: 10px;
 }
 </style>
+
+  <!-- PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="I/O CAN">
+  <meta name="theme-color" content="#00e5ff">
+  <link rel="manifest" href="data:application/json,{%22name%22:%22I/O%20CAN%22,%22short_name%22:%22I/OCAN%22,%22theme_color%22:%2200e5ff%22,%22background_color%22:%22080d14%22,%22display%22:%22standalone%22,%22start_url%22:%22./%22}">
+  <!-- PWA icon (inline SVG → base64) -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzA2MTIyMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwMjA4MTAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImN5YW5fZ3JhZCIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMDA5OWNjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzAwZTVmZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ib3JhbmdlX2dyYWQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIwIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmNjYwMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmZmFhMDAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8ZmlsdGVyIGlkPSJnbG93X2MiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIzIiByZXN1bHQ9ImIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJiIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgICA8ZmlsdGVyIGlkPSJnbG93X28iPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyLjUiIHJlc3VsdD0iYiIvPgogICAgICA8ZmVNZXJnZT48ZmVNZXJnZU5vZGUgaW49ImIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+CiAgICA8L2ZpbHRlcj4KICAgIDxjbGlwUGF0aCBpZD0icm91bmRfY2xpcCI+CiAgICAgIDxyZWN0IHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iMzYiLz4KICAgIDwvY2xpcFBhdGg+CiAgPC9kZWZzPgoKICA8IS0tIOiDjOaZryAtLT4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjM2IiBmaWxsPSJ1cmwoI2JnKSIvPgoKICA8IS0tIOWbnui3r+Wfuuadv+OCsOODquODg+ODieODhuOCr+OCueODgeODoyAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMDgiPgogICAgPGxpbmUgeDE9IjAiIHkxPSIzMCIgeDI9IjE4MCIgeTI9IjMwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMCIgeTE9IjYwIiB4Mj0iMTgwIiB5Mj0iNjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iOTAiIHgyPSIxODAiIHkyPSI5MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjAiIHkxPSIxMjAiIHgyPSIxODAiIHkyPSIxMjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iMTUwIiB4Mj0iMTgwIiB5Mj0iMTUwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMzAiIHkxPSIwIiB4Mj0iMzAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSI2MCIgeTE9IjAiIHgyPSI2MCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjkwIiB5MT0iMCIgeDI9IjkwIiB5Mj0iMTgwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMTIwIiB5MT0iMCIgeDI9IjEyMCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjE1MCIgeTE9IjAiIHgyPSIxNTAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICA8L2c+CgogIDwhLS0g5aSW5ZGo44Oq44Oz44KwICjjgrfjgqLjg7MpIC0tPgogIDxjaXJjbGUgY3g9IjkwIiBjeT0iOTAiIHI9IjgwIiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjY3lhbl9ncmFkKSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG9wYWNpdHk9IjAuMyIvPgoKICA8IS0tIENBTuazouW9ouODqeOCpOODsyAo5LiL6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIGZpbHRlcj0idXJsKCNnbG93X2MpIiBvcGFjaXR5PSIwLjU1Ij4KICAgIDxwb2x5bGluZSBwb2ludHM9IjEwLDE0OCAxMCwxMzggMzUsMTM4IDM1LDE1OCA2MCwxNTggNjAsMTM4IDg1LDEzOCA4NSwxNTggMTEwLDE1OCAxMTAsMTM4IDEzNSwxMzggMTM1LDE1OCAxNjAsMTU4IDE2MCwxNDggMTcwLDE0OCIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPC9nPgoKICA8IS0tIOOCouODiuODreOCsOazouW9oiAo5LiK6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMjUiPgogICAgPHBhdGggZD0iTTEwLDMyIFEyNSwyMiA0MCwzMiBRNTUsNDIgNzAsMzIgUTg1LDIyIDEwMCwzMiBRMTE1LDQyIDEzMCwzMiBRMTQ1LDIyIDE3MCwzMiIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDwvZz4KCiAgPCEtLSBJL08g44OG44Kt44K544OIICjjgqrjg6zjg7PjgrgpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSI4NCIgZm9udC1zaXplPSI0NiIgZmlsbD0idXJsKCNvcmFuZ2VfZ3JhZCkiCiAgICB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwgQmxhY2ssc2Fucy1zZXJpZiIKICAgIGZvbnQtd2VpZ2h0PSI5MDAiIGxldHRlci1zcGFjaW5nPSItMSIgZmlsdGVyPSJ1cmwoI2dsb3dfbykiPkkvTzwvdGV4dD4KCiAgPCEtLSDljLrliIfjgorjg6njgqTjg7MgLS0+CiAgPGxpbmUgeDE9IjQwIiB5MT0iOTQiIHgyPSIxNDAiIHkyPSI5NCIgc3Ryb2tlPSJ1cmwoI2N5YW5fZ3JhZCkiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjYiLz4KCiAgPCEtLSBDQU4g44OG44Kt44K544OIICjjgrfjgqLjg7MpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSIxMzIiIGZvbnQtc2l6ZT0iNDYiIGZpbGw9InVybCgjY3lhbl9ncmFkKSIKICAgIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjayxzYW5zLXNlcmlmIgogICAgZm9udC13ZWlnaHQ9IjkwMCIgbGV0dGVyLXNwYWNpbmc9IjQiIGZpbHRlcj0idXJsKCNnbG93X2MpIj5DQU48L3RleHQ+CgogIDwhLS0g44Kz44O844OK44O844OJ44OD44OIICjlm57ot6/jg5Hjg4Pjg4npoqgpIC0tPgogIDxnIG9wYWNpdHk9IjAuNCI+CiAgICA8Y2lyY2xlIGN4PSIyMiIgY3k9IjIyIiByPSIzIiBmaWxsPSIjMDBlNWZmIi8+CiAgICA8Y2lyY2xlIGN4PSIxNTgiIGN5PSIyMiIgcj0iMyIgZmlsbD0iIzAwZTVmZiIvPgogICAgPGNpcmNsZSBjeD0iMjIiIGN5PSIxNTgiIHI9IjMiIGZpbGw9IiNmZjg4MDAiLz4KICAgIDxjaXJjbGUgY3g9IjE1OCIgY3k9IjE1OCIgcj0iMyIgZmlsbD0iI2ZmODgwMCIvPgogIDwvZz4KCiAgPCEtLSDmjqXntprjg6njgqTjg7MgKOOCs+ODvOODiuODvOODieODg+ODiOOBi+OCiSkgLS0+CiAgPGcgb3BhY2l0eT0iMC4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSIyMiIgeTI9IjQwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSI0MCIgeTI9IjIyIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjIyIiB4Mj0iMTU4IiB5Mj0iNDAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMjIiIHgyPSIxNDAiIHkyPSIyMiIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjEiLz4KICAgIDxsaW5lIHgxPSIyMiIgeTE9IjE1OCIgeDI9IjIyIiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMTU4IiB4Mj0iNDAiIHkyPSIxNTgiIHN0cm9rZT0iI2ZmODgwMCIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMTU4IiB4Mj0iMTU4IiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjE1OCIgeDI9IjE0MCIgeTI9IjE1OCIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEiLz4KICA8L2c+Cjwvc3ZnPg==">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23081828'/%3E%3Cstop offset='1' stop-color='%23030a12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='32' fill='url(%23g)'/%3E%3Ccircle cx='90' cy='90' r='72' fill='none' stroke='%2300e5ff' stroke-width='3' opacity='0.3'/%3E%3Ccircle cx='90' cy='90' r='55' fill='none' stroke='%2300e5ff' stroke-width='1.5' opacity='0.15'/%3E%3Ctext x='90' y='80' font-size='28' fill='%23ff8800' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='2'%3EI/O%3C/text%3E%3Ctext x='90' y='112' font-size='28' fill='%2300e5ff' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='3'%3ECAN%3C/text%3E%3Cline x1='50' y1='92' x2='130' y2='92' stroke='%2300e5ff' stroke-width='1.5' opacity='0.5'/%3E%3C/svg%3E">
 </head>
 <body>
 <div id="app">
 
   <!-- TOPBAR -->
   <div id="topbar">
-    <div class="t-title">AnaCAN</div>
+    <div class="t-title">I/O CAN</div>
     <div class="t-spacer"></div>
     <div id="ble-badge"  class="t-badge">BLE --</div>
     <div id="can-badge"  class="t-badge">CAN --</div>
@@ -353,11 +363,18 @@ html, body {
 
   <!-- CONNECT OVERLAY -->
   <div id="connect-overlay">
-    <div class="co-logo">ANA-CAN</div>
+    <div class="co-logo">I/O CAN</div>
     <div class="co-sub">ATOMS3R · EXT.I/O2 · CAN CONVERTER v2</div>
     <button id="connect-btn" onclick="startConnect()">
       <span class="ci">📡</span>CONNECT
     </button>
+    <div style="margin-top:20px;">
+      <span onclick="showView(currentView || 'settings')"
+        style="color:#334455;font-size:0.8rem;letter-spacing:0.1em;cursor:pointer;
+               text-decoration:underline;text-underline-offset:4px;">
+        接続せずに設定を開く
+      </span>
+    </div>
   </div>
 
   <!-- CONTENT -->
@@ -591,7 +608,10 @@ async function startConnect() {
 
 function onDisconnected() {
   setConnected(false);
-  document.getElementById("connect-overlay").style.display = "flex";
+  // settings ビューにいる場合はオーバーレイを出さない (設定は常にアクセス可)
+  if (currentView !== "settings") {
+    document.getElementById("connect-overlay").style.display = "flex";
+  }
   log("切断");
 }
 
@@ -672,6 +692,8 @@ function parseMsg(msg) {
 // VIEW NAVIGATION
 // ════════════════════════════════════════════
 function showView(v) {
+  // オーバーレイを隠してビューへ遷移
+  document.getElementById("connect-overlay").style.display = "none";
   currentView = v;
   ["gauge","keypad","settings"].forEach(n => {
     document.getElementById("view-"+n).classList.toggle("active", n===v);
@@ -1154,4 +1176,4 @@ window.addEventListener("load", () => {
 });
 </script>
 </body>
-</html>  
+</html>
