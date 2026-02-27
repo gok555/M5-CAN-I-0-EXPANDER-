@@ -1,463 +1,1694 @@
-# ==========================================
-# ATOM S3R + Atomic CAN Base + EXT.I/O 2
-# Ver 2.0 - Analog→CAN + AUX Keypad
-# ==========================================
-# INPUT ピン : EXT.I/O 2 ADC読取 → CAN送信
-# AUX   ピン : キーパッドON/OFF  → 別CAN ID送信
-# ==========================================
-import M5
-from M5 import *
-import time
-from hardware import I2C, Pin
-from unit import CANUnit
-import bluetooth
-import struct
-from micropython import const
-from esp32 import NVS
-
-# ── ハードウェア定義 ──────────────────────
-TX_PIN      = 6
-RX_PIN      = 5
-CAN_BAUDRATE = 500000
-I2C_SCL_PIN = 1
-I2C_SDA_PIN = 2
-EXTIO2_ADDR = 0x45
-
-# ── EXT.I/O 2 レジスタマップ ──────────────
-REG_MODE_BASE  = 0x00  # +pin(0-7) : モード設定
-REG_ADC_BASE   = 0x20  # +pin*2    : ADC値 2byte LE
-REG_OUT_BASE   = 0x10  # +pin      : デジタル出力
-EXTIO2_MODE_OUTPUT = 1
-EXTIO2_MODE_ADC    = 4
-
-# ── デフォルト設定 ────────────────────────
-NUM_CH      = 8
-can_tx_id   = 0x500   # ADC用 CAN TX ID (Frame1=id, Frame2=id+1)
-sw_can_id   = 0x5A0   # スイッチ用 CAN TX ID (1フレーム8バイト)
-
-# pin_modes: 0=AUX(キーパッドスイッチ), 1=INPUT(ADC)
-pin_modes   = [1] * NUM_CH
-
-# スイッチ状態バッファ  can_state[i] = 現在のCANバイト値
-can_state   = bytearray(8)
-
-# スイッチON/OFF値 (ユーザー設定, デフォルト: ON=1, OFF=0)
-sw_on_vals  = [1] * NUM_CH
-sw_off_vals = [0] * NUM_CH
-
-# ── タイミング(ms) ─────────────────────────
-CAN_SEND_INT  = 50
-BLE_SEND_INT  = 50
-DISP_INT      = 600
-RECOVERY_INT  = 5000
-
-# ── 状態変数 ──────────────────────────────
-can           = None
-i2c_bus       = None
-extio_found   = False
-can_error     = False
-ble_tx_queue  = []
-ble_rx_queue  = []
-nvs           = None
-_pending_cfg  = False
-
-last_can_send = 0
-last_ble_send = 0
-last_display  = 0
-last_recovery = 0
-
-adc_raw       = [0] * NUM_CH   # 12bit ADC生値
-
-# ── BLE UART (Nordic UART Service) ───────
-UART_UUID = bluetooth.UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
-UART_TX   = bluetooth.UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
-UART_RX   = bluetooth.UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
-_IRQ_CENTRAL_CONNECT    = const(1)
-_IRQ_CENTRAL_DISCONNECT = const(2)
-_IRQ_GATTS_WRITE        = const(3)
-
-
-class BLEUART:
-    def __init__(self, ble):
-        self._ble = ble
-        self._ble.active(True)
-        self._ble.irq(self._irq)
-        ((self._tx, self._rx),) = self._ble.gatts_register_services([
-            (UART_UUID, ((UART_TX, bluetooth.FLAG_NOTIFY),
-                         (UART_RX, bluetooth.FLAG_WRITE)))
-        ])
-        self._connections = set()
-        self._advertise()
-
-    def _advertise(self):
-        try:
-            self._ble.gap_advertise(100000, b'\x02\x01\x06\x10\x09M5S3R_AnaCAN')
-        except: pass
-
-    def _irq(self, event, data):
-        global _pending_cfg
-        if event == _IRQ_CENTRAL_CONNECT:
-            self._connections.add(data[0])
-            _pending_cfg = True
-        elif event == _IRQ_CENTRAL_DISCONNECT:
-            if data[0] in self._connections:
-                self._connections.remove(data[0])
-            self._advertise()
-        elif event == _IRQ_GATTS_WRITE:
-            try:
-                cmd = self._ble.gatts_read(self._rx).decode().strip()
-                if cmd:
-                    ble_rx_queue.append(cmd)
-            except: pass
-
-    def send(self, data):
-        for conn in self._connections:
-            try: self._ble.gatts_notify(conn, self._tx, data)
-            except: pass
-
-    @property
-    def connected(self):
-        return len(self._connections) > 0
-
-
-# ── NVS 保存 ──────────────────────────────
-def nvs_save_all():
-    if not nvs: return
-    try:
-        nvs.set_i32("can_tx_id", can_tx_id)
-        nvs.set_i32("sw_can_id", sw_can_id)
-        for i in range(NUM_CH):
-            nvs.set_i32(f"pin_mode_{i}", pin_modes[i])
-            nvs.set_i32(f"sw_on_{i}",   sw_on_vals[i])
-            nvs.set_i32(f"sw_off_{i}",  sw_off_vals[i])
-            nvs.set_i32(f"sw_state_{i}", int(can_state[i]))
-        nvs.commit()
-    except Exception as e:
-        print("NVS Save Err:", e)
-
-
-def nvs_save_state():
-    """スイッチ状態だけ高速保存"""
-    if not nvs: return
-    try:
-        for i in range(NUM_CH):
-            nvs.set_i32(f"sw_state_{i}", int(can_state[i]))
-        nvs.commit()
-    except: pass
-
-
-# ── EXT.I/O 2 ────────────────────────────
-def apply_pin_modes():
-    """設定に基づき EXT.I/O 2 の各ピンモードを書き込む"""
-    if not extio_found: return
-    for i in range(NUM_CH):
-        hw_mode = EXTIO2_MODE_ADC if pin_modes[i] == 1 else EXTIO2_MODE_OUTPUT
-        try:
-            i2c_bus.writeto_mem(EXTIO2_ADDR, REG_MODE_BASE + i, bytes([hw_mode]))
-            time.sleep_ms(3)
-        except: pass
-
-
-def read_adc_all():
-    """INPUT チャンネルの ADC 値を取得 (12bit, 0-4095)"""
-    if not extio_found: return
-    for i in range(NUM_CH):
-        if pin_modes[i] != 1:
-            adc_raw[i] = 0
-            continue
-        try:
-            d = i2c_bus.readfrom_mem(EXTIO2_ADDR, REG_ADC_BASE + i * 2, 2)
-            adc_raw[i] = (d[0] | (d[1] << 8)) & 0x0FFF
-        except:
-            adc_raw[i] = 0
-
-
-# ── CAN ──────────────────────────────────
-def build_can_frame(start_ch):
-    """4ch分を8バイトCANフレームへパック (2byte LE, 12bit)"""
-    buf = bytearray(8)
-    for j in range(4):
-        val = adc_raw[start_ch + j] & 0x0FFF
-        buf[j * 2]     = val & 0xFF
-        buf[j * 2 + 1] = (val >> 8) & 0x0F
-    return buf
-
-
-def safe_can_send(cid, data):
-    global can_error
-    if can:
-        try:
-            can.send(data, cid, timeout=0)
-            can_error = False
-        except:
-            can_error = True
-
-
-def check_can_recovery():
-    global can, last_recovery, can_error
-    now = time.ticks_ms()
-    if time.ticks_diff(now, last_recovery) < RECOVERY_INT: return
-    last_recovery = now
-    try:
-        if can and can.state() != CANUnit.RUNNING:
-            can_error = True
-            can.deinit()
-            time.sleep_ms(50)
-            can = CANUnit(0, port=(TX_PIN, RX_PIN),
-                          mode=CANUnit.NORMAL, baudrate=CAN_BAUDRATE)
-            time.sleep_ms(100)
-            can_error = False
-    except: pass
-
-
-def send_sw_can():
-    """スイッチ状態を sw_can_id で CAN 送信"""
-    safe_can_send(sw_can_id, can_state)
-
-
-# ── BLE コマンド処理 ──────────────────────
-def queue_config_sync():
-    """接続時に全設定をクライアントへ送信"""
-    ble_tx_queue.append(f"TXID={hex(can_tx_id)}".encode())
-    ble_tx_queue.append(f"SW_TXID={hex(sw_can_id)}".encode())
-    ble_tx_queue.append(("PIN_MODES=" + ",".join(str(m) for m in pin_modes)).encode())
-    ble_tx_queue.append(("SW_ON="  + ",".join(str(v) for v in sw_on_vals)).encode())
-    ble_tx_queue.append(("SW_OFF=" + ",".join(str(v) for v in sw_off_vals)).encode())
-    ble_tx_queue.append(("SW_VALS=" + ",".join(str(b) for b in can_state)).encode())
-
-
-def process_ble_cmd():
-    global can_tx_id, sw_can_id, pin_modes, sw_on_vals, sw_off_vals
-    if not ble_rx_queue: return
-    cmd = ble_rx_queue.pop(0)
-    try:
-        # ── 設定要求 ──────────────────────────
-        if cmd == "REQUEST_STATE":
-            queue_config_sync()
-            return
-
-        # ── ADC CAN TX ID   SET_TXID=0x501 ───
-        if cmd.startswith("SET_TXID="):
-            can_tx_id = int(cmd.split('=')[1], 16)
-            nvs_save_all()
-            ble_tx_queue.append(f"TXID={hex(can_tx_id)}".encode())
-
-        # ── スイッチ CAN TX ID  SW_TXID=0x5A0 ─
-        elif cmd.startswith("SW_TXID="):
-            sw_can_id = int(cmd.split('=')[1], 16)
-            nvs_save_all()
-            ble_tx_queue.append(f"SW_TXID={hex(sw_can_id)}".encode())
-
-        # ── ピンモード変更  SET_PIN_MODE=3,0 ──
-        elif cmd.startswith("SET_PIN_MODE="):
-            p = cmd.split('=')[1].split(',')
-            pin = int(p[0]); mode = int(p[1])
-            if 0 <= pin < NUM_CH:
-                pin_modes[pin] = mode
-                if mode == 0:           # AUXになったらOFF値をセット
-                    can_state[pin] = sw_off_vals[pin]
-                apply_pin_modes()
-                nvs_save_all()
-                ble_tx_queue.append(
-                    ("PIN_MODES=" + ",".join(str(m) for m in pin_modes)).encode()
-                )
-                ble_tx_queue.append(
-                    ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
-                )
-
-        # ── スイッチON/OFF値設定  SW_CFG=pin,on,off ──
-        elif cmd.startswith("SW_CFG="):
-            p = cmd.split('=')[1].split(',')
-            pin = int(p[0]); on_v = int(p[1]); off_v = int(p[2])
-            if 0 <= pin < NUM_CH:
-                sw_on_vals[pin]  = on_v  & 0xFF
-                sw_off_vals[pin] = off_v & 0xFF
-                if can_state[pin] != sw_on_vals[pin]:
-                    can_state[pin] = sw_off_vals[pin]
-                nvs_save_all()
-                ble_tx_queue.append(
-                    f"SW_CFG_OK={pin},{sw_on_vals[pin]},{sw_off_vals[pin]}".encode()
-                )
-
-        # ── スイッチ操作  SW_SET=pin,val ─────
-        elif cmd.startswith("SW_SET="):
-            p = cmd.split('=')[1].split(',')
-            pin = int(p[0]); val = int(p[1])
-            if 0 <= pin < NUM_CH:
-                can_state[pin] = val & 0xFF
-                send_sw_can()
-                nvs_save_state()
-                ble_tx_queue.append(
-                    ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
-                )
-
-    except Exception as e:
-        print("BLE CMD Err:", cmd, e)
-
-
-def send_adc_packet(uart):
-    """ADC生値 8ch 分を BLE で送信  AVALS=1023,..."""
-    parts = ",".join(str(adc_raw[i]) for i in range(NUM_CH))
-    try: uart.send(("AVALS=" + parts).encode())
-    except: pass
-
-
-# ── ディスプレイ (ATOMS3R 128x128px) ───
-_disp_row = 0
-
-
-def disp_line(text, color=0xFFFF):
-    global _disp_row
-    M5.Display.setCursor(0, _disp_row * 13)
-    M5.Display.setTextColor(color, 0x0000)
-    M5.Display.print(text[:21])
-    _disp_row += 1
-
-
-def update_display():
-    global _disp_row
-    M5.Display.clear(0x0000)
-    _disp_row = 0
-    M5.Display.setTextSize(1)
-
-    can_col = 0xF800 if can_error else 0x07E0
-    ble_col = 0x07E0 if uart.connected else 0x8410
-
-    disp_line("= AnaCAN v2.0 =", 0x07FF)
-    disp_line(f"CAN:{'ERR' if can_error else ' OK '}", can_col)
-    disp_line(f"ADC:{hex(can_tx_id)}", 0xFFFF)
-    disp_line(f"SW :{hex(sw_can_id)}", 0xFFFF)
-    disp_line(
-        f"BLE:{'ON ' if uart.connected else '---'} IO:{'Y' if extio_found else 'N'}",
-        ble_col
-    )
-    disp_line("-" * 21, 0x4208)
-
-    # AUX スイッチ状態
-    for i in range(NUM_CH):
-        if pin_modes[i] == 0:
-            is_on = (can_state[i] == sw_on_vals[i])
-            col   = 0x07E0 if is_on else 0xF800
-            disp_line(f"P{i}:{'ON ' if is_on else 'OFF'} val={can_state[i]}", col)
-
-    # INPUT ADC値 (上位4ch分)
-    shown = 0
-    for i in range(NUM_CH):
-        if pin_modes[i] == 1 and shown < 4:
-            v = adc_raw[i]
-            volt = v * 3.3 / 4095.0
-            disp_line(f"P{i}:{v:4d} {volt:.1f}V", 0xFFFF)
-            shown += 1
-
-
-# ──────────────────────────────────────────
-# 初期化
-# ──────────────────────────────────────────
-M5.begin()
-M5.Display.setTextSize(1)
-M5.Display.clear(0x0000)
-M5.Display.setTextColor(0x07FF, 0x0000)
-M5.Display.print("Booting v2.0...")
-
-# NVS ロード
-try:
-    nvs = NVS("ana_can")
-    try: can_tx_id = nvs.get_i32("can_tx_id")
-    except: pass
-    try: sw_can_id = nvs.get_i32("sw_can_id")
-    except: pass
-    for i in range(NUM_CH):
-        try: pin_modes[i]   = nvs.get_i32(f"pin_mode_{i}")
-        except: pass
-        try: sw_on_vals[i]  = nvs.get_i32(f"sw_on_{i}")
-        except: pass
-        try: sw_off_vals[i] = nvs.get_i32(f"sw_off_{i}")
-        except: pass
-        try: can_state[i]   = nvs.get_i32(f"sw_state_{i}") & 0xFF
-        except: pass
-    print(f"NVS: ADC={hex(can_tx_id)} SW={hex(sw_can_id)}")
-except Exception as e:
-    print("NVS Init Err:", e)
-
-# I2C + EXT.I/O 2
-try:
-    i2c_bus = I2C(0, scl=Pin(I2C_SCL_PIN), sda=Pin(I2C_SDA_PIN), freq=200000)
-    scan = i2c_bus.scan()
-    extio_found = EXTIO2_ADDR in scan
-    if extio_found:
-        apply_pin_modes()
-        print("EXT.I/O 2: OK")
-    else:
-        print("EXT.I/O 2: NOT found", [hex(a) for a in scan])
-except Exception as e:
-    print("I2C Fail:", e)
-
-# CAN
-try:
-    can = CANUnit(0, port=(TX_PIN, RX_PIN),
-                  mode=CANUnit.NORMAL, baudrate=CAN_BAUDRATE)
-    time.sleep_ms(100)
-    print("CAN Init OK")
-except Exception as e:
-    print("CAN Init Fail:", e)
-    can_error = True
-
-# BLE
-ble  = bluetooth.BLE()
-uart = BLEUART(ble)
-print("BLE: M5S3R_AnaCAN")
-
-time.sleep_ms(200)
-update_display()
-
-# ──────────────────────────────────────────
-# メインループ
-# ──────────────────────────────────────────
-while True:
-    M5.update()
-    now = time.ticks_ms()
-
-    process_ble_cmd()
-
-    if _pending_cfg:
-        _pending_cfg = False
-        ble_tx_queue.append(b"__SYNC_DELAY__")
-
-    read_adc_all()
-
-    # CAN 送信 (20Hz)
-    if time.ticks_diff(now, last_can_send) >= CAN_SEND_INT:
-        if any(pin_modes[i] == 1 for i in range(NUM_CH)):
-            safe_can_send(can_tx_id,     build_can_frame(0))
-            safe_can_send(can_tx_id + 1, build_can_frame(4))
-        if any(pin_modes[i] == 0 for i in range(NUM_CH)):
-            send_sw_can()
-        last_can_send = now
-
-    # BLE 送信
-    if ble_tx_queue:
-        item = ble_tx_queue.pop(0)
-        if item == b"__SYNC_DELAY__":
-            time.sleep_ms(300)
-            queue_config_sync()
-        else:
-            try: uart.send(item)
-            except: pass
-    elif time.ticks_diff(now, last_ble_send) >= BLE_SEND_INT:
-        if uart.connected:
-            send_adc_packet(uart)
-            ble_tx_queue.append(
-                ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
-            )
-            ble_tx_queue.append(
-                b"STATUS=ERR" if can_error else b"STATUS=CAN_OK"
-            )
-        last_ble_send = now
-
-    # ディスプレイ更新 (低頻度)
-    if time.ticks_diff(now, last_display) >= DISP_INT:
-        check_can_recovery()
-        update_display()
-        last_display = now
-
-    time.sleep_ms(2)
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CAN Dash">
+    <meta name="theme-color" content="#0a0a0f">
+    <link rel="icon" type="image/png" sizes="512x512" href="data:image/png;base64,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">
+    <link rel="apple-touch-icon" sizes="512x512" href="data:image/png;base64,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">
+    <title>CAN Dash</title>
+    <style>
+        /* Reset & Base */
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh;
+            overflow: hidden; background-color: #1a1a1a; color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            touch-action: manipulation; display: flex; flex-direction: column;
+        }
+        /* --- Views --- */
+        .view-container {
+            display: none; flex: 1; flex-direction: column; box-sizing: border-box;
+            padding: 10px; width: 100%; height: 100%; overflow: hidden;
+        }
+        .view-container.active { display: flex; }
+        /* --- Main View (Keypad) --- */
+        #view-main { position: relative; }
+        .main-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 5px; padding: 0 5px; flex-shrink: 0; height: 40px;
+        }
+        .status-group { display: flex; align-items: center; gap: 10px; }
+        .status-indicator { font-size: 0.9rem; color: #888; font-weight: bold; }
+        .status-indicator.can-ok { color: #28a745; }
+        .status-indicator.can-err { color: #dc3545; }
+        .status-indicator.stalled { color: #ffc107; }
+        .status-indicator.connected { color: #28a745; }
+        .header-btn {
+            background: none; border: none; font-size: 1.5rem; cursor: pointer;
+            padding: 5px; color: #aaa; line-height: 1;
+        }
+        /* Connect Overlay */
+        #connect-overlay {
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            width: 100%; height: 100%; position: absolute; top: 40px; left: 0; bottom: 0;
+            background: #1a1a1a; z-index: 10;
+        }
+        #start-btn {
+            width: 200px; height: 200px; border-radius: 50%; border: 4px solid #007bff;
+            background: rgba(0, 123, 255, 0.1); color: #007bff; font-size: 1.5rem; font-weight: bold;
+            cursor: pointer; box-shadow: 0 0 20px rgba(0, 123, 255, 0.3); transition: all 0.2s ease;
+            display: flex; justify-content: center; align-items: center; text-align: center;
+        }
+        #start-btn:active { transform: scale(0.95); background: rgba(0, 123, 255, 0.3); }
+        #keypad {
+            display: none; gap: 8px; flex-grow: 1; width: 100%; max-width: 600px; align-self: center;
+            grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr);
+        }
+        #keypad.visible { display: grid; }
+        @media (orientation: landscape) {
+            #keypad { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
+            .main-header { margin-bottom: 2px; height: 30px; }
+            #connect-overlay { top: 30px; }
+        }
+        .key-btn {
+            background: #333; border: 3px solid var(--btn-color, #777); border-radius: 12px;
+            color: var(--btn-color, #fff); font-weight: bold; cursor: pointer;
+            display: flex; justify-content: center; align-items: center; flex-direction: column;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); position: relative; text-align: center;
+            width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
+            -webkit-touch-callout: none; touch-action: none; font-size: clamp(0.7rem, 4vw, 1.6rem); white-space: normal; overflow-wrap: break-word; word-break: break-word; line-height: 1.2;
+            transition: all 0.1s ease;
+        }
+        .key-btn:active, .key-btn.pressed { transform: scale(0.98); }
+        .key-btn.active {
+            background: var(--btn-color, #006000); color: #fff;
+            box-shadow: 0 0 15px var(--btn-color, rgba(0, 255, 0, 0.4));
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+        .key-btn.pressing { transform: scale(0.95); opacity: 0.8; }
+        /* --- Settings View --- */
+        #view-settings { background: #222; overflow-y: auto; align-items: center; }
+        .settings-header {
+            display: flex; width: 100%; align-items: center; margin-bottom: 20px;
+            padding-bottom: 10px; border-bottom: 1px solid #444; flex-shrink: 0;
+        }
+        .back-btn { background: none; border: none; font-size: 1.2rem; color: #fff; cursor: pointer; padding: 10px; }
+        .settings-title { flex-grow: 1; text-align: center; font-size: 1.2rem; font-weight: bold; }
+        .settings-group {
+            width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 20px;
+            box-sizing: border-box; padding: 0 5px;
+        }
+        .control-row { width: 100%; }
+        .action-btn {
+            width: 100%; padding: 15px; font-size: 1rem; border-radius: 8px; border: none;
+            color: white; cursor: pointer; font-weight: bold; display: flex;
+            justify-content: center; align-items: center; gap: 8px;
+        }
+        .btn-blue { background: #007bff; }
+        .btn-gray { background: #555; }
+        .btn-orange { background: #e67e22; }
+        .btn-green { background: #28a745; }
+        .btn-red { background: #dc3545; }
+        .id-input-group {
+            display: flex; align-items: center; background: #333; padding: 5px;
+            border-radius: 8px; gap: 5px; width: 100%; box-sizing: border-box; flex-wrap: nowrap;
+        }
+        .id-input-group label {
+            padding-left: 5px; color: #ddd; font-size: 0.85rem; white-space: nowrap; min-width: 35px;
+        }
+        #can-id-input, #k-meter-id-input, #temp-alarm-input {
+            flex: 1; background: #222; border: 1px solid #555; color: white; padding: 12px;
+            border-radius: 4px; text-align: center; font-family: monospace; font-size: 1.2rem; min-width: 80px;
+        }
+        input, select {
+             background: #222; border: 1px solid #555; color: white; padding: 8px;
+             border-radius: 4px; text-align: center; font-family: monospace; font-size: 1rem;
+        }
+        #set-id-btn { padding: 12px 20px; white-space: nowrap; min-width: 80px; }
+        /* Config List */
+        .config-list {
+            display: flex; flex-direction: column; gap: 10px; background: #2a2a2a;
+            padding: 10px; border-radius: 8px;
+        }
+        .config-list .config-row {
+            display: flex; justify-content: space-between; align-items: center;
+            background: #333; padding: 8px 10px; border-radius: 6px; gap: 5px; flex-wrap: wrap;
+        }
+        .config-name-input {
+            flex: 1; background: #222; border: 1px solid #555; color: white;
+            padding: 8px; border-radius: 4px; font-size: 16px; min-width: 60px;
+        }
+        /* Mini Segmented Control */
+        .mini-switch {
+            display: flex; background: #222; border-radius: 4px; padding: 2px; gap: 4px; flex-shrink: 0;
+        }
+        .mini-opt {
+            border: none; background: none; color: #666; font-size: 0.85rem;
+            padding: 6px 10px; border-radius: 3px; cursor: pointer;
+        }
+        .mini-opt.selected { background: #555; color: #fff; font-weight: bold; }
+        #log {
+            margin-top: 20px; width: 100%; height: 100px; min-height: 100px; overflow-y: auto;
+            background: #000; color: #0f0; font-family: monospace; font-size: 0.7rem;
+            padding: 5px; border: 1px solid #444; box-sizing: border-box;
+        }
+        #sync-overlay {
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6); z-index: 5; justify-content: center;
+            align-items: center; color: #00ff00; font-weight: bold; font-size: 1.2rem;
+        }
+        /* Live Preview Box Style */
+        .live-preview-box {
+            background: #111; border: 1px solid #444; border-radius: 6px; padding: 10px;
+            margin-top: 10px; margin-bottom: 10px; text-align: center;
+        }
+        .live-val { color: #00ff00; font-family: monospace; font-size: 1.5rem; font-weight: bold; }
+        .live-raw { color: #666; font-size: 0.8rem; margin-top: 2px; }
+        
+        /* Voice Animations */
+        @keyframes pulse-mic { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes blink-red { 0% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } 50% { color: #880000; text-shadow: none; } 100% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } }
+        .temp-warning { animation: blink-red 1s infinite; font-weight: bold; font-size: 1.4rem !important; }
+        /* --- Meter View --- */
+        #view-meter { background: #000; flex-direction: column; padding-top: 50px; box-sizing: border-box; }
+        #meter-grid {
+            display: grid; gap: 8px; width: 100%; height: 100%; padding: 10px; box-sizing: border-box;
+            grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr);
+        }
+        @media (orientation: landscape) { #meter-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); } }
+        .meter-cell {
+            background: #111; border: 2px solid #333; border-radius: 12px; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            position: relative; box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); overflow: hidden;
+        }
+        .meter-label {
+            position: absolute; top: 5px; left: 0; width: 100%; text-align: center;
+            color: #aaa; font-size: 0.75rem; text-transform: uppercase;
+            font-weight: 600; letter-spacing: 0.05em;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            padding: 0 6px; box-sizing: border-box;
+        }
+        .meter-value {
+            font-family: 'Courier New', Courier, monospace; font-weight: bold;
+            font-size: clamp(1.5rem, 6vw, 2.5rem); color: #fff;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.2);
+            transition: font-size 0.15s ease;
+        }
+        .meter-unit {
+            position: absolute; bottom: 5px; right: 8px;
+            color: #999; font-size: 0.65rem; font-weight: 500;
+            letter-spacing: 0.03em; text-transform: uppercase;
+        }
+        /* Specific Colors */
+        .val-green { color: #00FF00; text-shadow: 0 0 10px rgba(0, 255, 0, 0.4); }
+        .val-red { color: #FF0000; text-shadow: 0 0 10px rgba(255, 0, 0, 0.6); }
+        .val-yellow { color: #FFD700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); }
+        .val-cyan { color: #00FFFF; text-shadow: 0 0 10px rgba(0, 255, 255, 0.4); }
+        .val-gray { color: #444; }
+        .meter-header-btn {
+            position: absolute; top: 10px; left: 10px; font-size: 1.5rem; background: #333;
+            border: 1px solid #555; border-radius: 8px; padding: 5px 15px; color: white;
+            cursor: pointer; z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div id="view-meter" class="view-container">
+        <button class="meter-header-btn" onclick="showMain()">↩️ Back</button>
+        <div id="meter-grid">
+            <div class="meter-cell">
+                <div class="meter-label">Exhaust Temp</div>
+                <div id="meter-val-1" class="meter-value val-cyan">--</div>
+                <div class="meter-unit">°C</div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-2" class="meter-label">RX Monitor</div>
+                <div id="meter-val-2" class="meter-value val-yellow">---</div>
+                <div id="meter-unit-2" class="meter-unit">RAW</div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-3" class="meter-label">RX Mon 2</div>
+                <div id="meter-val-3" class="meter-value val-gray">---</div>
+                <div id="meter-unit-3" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-4" class="meter-label">RX Mon 3</div>
+                <div id="meter-val-4" class="meter-value val-gray">---</div>
+                <div id="meter-unit-4" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-5" class="meter-label">RX Mon 4</div>
+                <div id="meter-val-5" class="meter-value val-gray">---</div>
+                <div id="meter-unit-5" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-6" class="meter-label">RX Mon 5</div>
+                <div id="meter-val-6" class="meter-value val-gray">---</div>
+                <div id="meter-unit-6" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-7" class="meter-label">RX Mon 6</div>
+                <div id="meter-val-7" class="meter-value val-gray">---</div>
+                <div id="meter-unit-7" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-8" class="meter-label">RX Mon 7</div>
+                <div id="meter-val-8" class="meter-value val-gray">---</div>
+                <div id="meter-unit-8" class="meter-unit"></div>
+            </div>
+        </div>
+    </div>
+    <div id="view-main" class="view-container active">
+        <div class="main-header">
+            <div class="status-group">
+                <div id="status-display" class="status-indicator">🔴 Disconnected</div>
+                <div id="can-status-display" class="status-indicator" style="display:none; font-size:0.8rem; border-left:1px solid #444; padding-left:10px;">CAN: --</div>
+            </div>
+            <div style="flex:1;"></div>
+            <div style="display:flex; gap:15px; align-items:center;">
+                <button id="meter-view-btn" class="header-btn" onclick="showMeter()">📟</button>
+                <button id="main-sound-btn" class="header-btn" onclick="toggleSoundMain()" style="font-size:1.2rem;">🔊</button>
+                <button class="header-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+                <button id="settings-btn" class="header-btn" onclick="showSettings()">⚙️</button>
+            </div>
+        </div>
+        <div id="connect-overlay">
+            <button id="start-btn" onclick="handleStartConnect()">CONNECT<br>START</button>
+            <div style="margin-top:20px; color:#666; font-size:0.8rem;">Ver 4.0 (Group ID)</div>
+        </div>
+        <div id="sync-overlay">⚙️ Syncing...</div>
+        <div id="keypad"></div>
+    </div>
+    <div id="view-settings" class="view-container">
+        <div class="settings-header">
+            <button class="back-btn" onclick="showMain()">‹ Back</button>
+            <div class="settings-title">Settings</div>
+            <div style="width: 50px;"></div>
+        </div>
+        <div class="settings-group">
+            <div class="control-row" id="disconnect-row" style="display:none;">
+                <button id="disconnect-btn" class="action-btn btn-red" onclick="disconnect()">🔴 Disconnect</button>
+            </div>
+            <div class="control-row">
+                <div class="id-input-group">
+                    <label style="min-width: 60px;">PAD:0x</label>
+                    <input type="text" id="can-id-input" value="100" maxlength="3">
+                    <button id="set-id-btn" class="action-btn btn-orange" onclick="setCanId()">SET</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top:5px;">
+                <div class="id-input-group">
+                    <label style="min-width: 60px;">KID:0x</label>
+                    <input type="text" id="k-meter-id-input" value="200" maxlength="3">
+                    <button id="set-k-id-btn" class="action-btn btn-orange" onclick="setKMeterId()">SET</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top:5px;">
+                <div style="display:flex; gap:5px;">
+                    <div class="id-input-group" style="flex:0.4; padding:2px;">
+                        <input type="color" id="temp-color-input" value="#00FFFF" style="width:100%; height:35px; border:none; padding:0; background:none; cursor:pointer;">
+                    </div>
+                    <div class="id-input-group" style="flex:1; border: 1px solid #d35400;">
+                        <label style="min-width: 50px; color: #e67e22;">Alm:°C</label>
+                        <input type="number" id="temp-alarm-input" value="950" placeholder="e.g. 900">
+                    </div>
+                </div>
+                <div style="font-size:0.7rem; color:#888; margin-top:2px; text-align:right;">Exhaust Temp Color & Alarm</div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">🔐 Biometric Registration</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <div id="bio-status" style="color:#888; font-size:0.8rem;">Checking...</div>
+                    <button id="btn-bio-reg" class="action-btn btn-blue" onclick="registerBiometric()" style="padding:10px; font-size:0.9rem; width:auto;">Register</button>
+                    <button id="btn-bio-clear" class="action-btn btn-red" onclick="clearBiometric()" style="padding:10px; font-size:0.9rem; width:auto; display:none;">Clear</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">Mapping Presets</div>
+                <div style="display:flex; gap:10px;">
+                    <button class="action-btn btn-gray" onclick="applyPreset('normal')" style="padding:10px; font-size:0.8rem;">Normal (1=0..8=7)</button>
+                    <button class="action-btn btn-gray" onclick="applyPreset('reverse')" style="padding:10px; font-size:0.8rem;">Reverse (1=7..8=0)</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top: 10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px; margin-left: 5px;">Button Configuration</div>
+                <div id="config-list-container" class="config-list"></div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+
+                <!-- ★ グループID設定エリア (v4.0追加) -->
+                <div style="background:#1a2a3a; border:1px solid #0af; border-radius:8px; padding:10px; margin-bottom:12px;">
+                    <div style="color:#0af; font-size:0.9rem; font-weight:bold; margin-bottom:6px;">📡 受信グループID設定</div>
+                    <div style="font-size:0.7rem; color:#888; margin-bottom:8px;">
+                        Group1 → Monitor1〜4 &nbsp;|&nbsp; Group2 → Monitor5〜7
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <div class="id-input-group" style="border:1px solid #0af;">
+                            <label style="min-width:65px; color:#0af; font-size:0.85rem;">Grp1: 0x</label>
+                            <input type="text" id="grp1-id-input" maxlength="3"
+                                oninput="updateGrpDec('grp1'); autoFillGrp2();"
+                                style="flex:1; background:#222; border:1px solid #555; color:#0af; padding:6px; border-radius:4px; text-align:center; font-family:monospace; font-size:1rem; font-weight:bold;">
+                            <span id="grp1-dec-display" style="font-size:0.7rem; color:#666; padding-right:6px; min-width:45px; text-align:right;"></span>
+                        </div>
+                        <div class="id-input-group" style="border:1px solid #fa0;">
+                            <label style="min-width:65px; color:#fa0; font-size:0.85rem;">Grp2: 0x</label>
+                            <input type="text" id="grp2-id-input" maxlength="3"
+                                oninput="updateGrpDec('grp2')"
+                                style="flex:1; background:#222; border:1px solid #555; color:#fa0; padding:6px; border-radius:4px; text-align:center; font-family:monospace; font-size:1rem; font-weight:bold;">
+                            <span id="grp2-dec-display" style="font-size:0.7rem; color:#666; padding-right:6px; min-width:45px; text-align:right;"></span>
+                        </div>
+                        <button class="action-btn btn-blue" onclick="setGroups()" style="padding:10px; font-size:0.9rem;">📡 SET & SAVE Groups</button>
+                        <div id="grp-status" style="font-size:0.75rem; color:#888; text-align:right;"></div>
+                    </div>
+                </div>
+
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">📡 RX Monitor Config</div>
+                
+                <div style="display:flex; gap:5px; margin-bottom:10px;">
+                     <select id="rx-slot-select" onchange="loadRxSlotFromUI()" style="width:100%; background:#005cbf; font-weight:bold; font-size:1.1rem; padding:10px;">
+                         <option value="0">Monitor 1 (VAL) ← Grp1 Byte0-1</option>
+                         <option value="1">Monitor 2 (VAL2) ← Grp1 Byte2-3</option>
+                         <option value="2">Monitor 3 (VAL3) ← Grp1 Byte4-5</option>
+                         <option value="3">Monitor 4 (VAL4) ← Grp1 Byte6-7</option>
+                         <option value="4">Monitor 5 (VAL5) ← Grp2 Byte0-1</option>
+                         <option value="5">Monitor 6 (VAL6) ← Grp2 Byte2-3</option>
+                         <option value="6">Monitor 7 (VAL7) ← Grp2 Byte4-5</option>
+                     </select>
+                </div>
+
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:0.3; padding:2px;">
+                        <input type="color" id="rx-color-input" value="#FFD700" style="width:100%; height:30px; border:none; padding:0; background:none; cursor:pointer;">
+                    </div>
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:30px; font-size:0.75rem; color:#74c0fc; padding-left:2px;">Name</label>
+                        <input type="text" id="rx-label-input" value="RX Monitor" maxlength="12" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-size:0.8rem;">
+                    </div>
+                </div>
+                <!-- ★ ID / Index 行を削除 → Mode のみ残す -->
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:40px; font-size:0.75rem; padding-left:2px;">Mode</label>
+                        <select id="rx-mode-select" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; font-size:0.75rem;">
+                            <option value="0">1B</option>
+                            <option value="1" selected>2B-LE</option>
+                            <option value="2">2B-BE</option>
+                            <option value="3">1B Sig</option>
+                            <option value="4">2B-L Sig</option>
+                            <option value="5">2B-B Sig</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:0.8; padding: 1px; gap: 1px;">
+                        <label style="min-width:15px; font-size:0.75rem; padding-left:2px;">Mul</label>
+                        <input type="text" id="rx-mul-input" value="1.0" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                    <div class="id-input-group" style="flex:0.8; padding: 1px; gap: 1px;">
+                        <label style="min-width:15px; font-size:0.75rem; padding-left:2px;">Add</label>
+                         <input type="text" id="rx-add-input" value="0" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:18px; font-size:0.75rem; padding-left:2px;">Dec</label>
+                        <select id="rx-dec-select" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; font-size:0.8rem;">
+                            <option value="0">0</option>
+                            <option value="1">0.0</option>
+                            <option value="2">0.00</option>
+                            <option value="3">0.000</option>
+                            <option value="4">0.0000</option>
+                            <option value="5">0.00000</option>
+                        </select>
+                    </div>
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:22px; font-size:0.75rem; padding-left:2px;">Unit</label>
+                        <input type="text" id="rx-unit-input" placeholder="-" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-size:0.8rem;">
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="width: 100%; padding: 1px; gap: 1px; border:1px solid #d35400;">
+                        <label style="min-width:35px; font-size:0.75rem; padding-left:5px; color:#e67e22;">Alarm</label>
+                        <select id="rx-alarm-mode-select" style="flex:0.6; background:#222; border:1px solid #555; color:#ccc; padding:4px 0; border-radius:4px; font-size:0.75rem; margin-right:2px;">
+                            <option value="high">Over (≧)</option>
+                            <option value="low">Under (≦)</option>
+                        </select>
+                        <input type="text" inputmode="text" id="rx-alarm-input" placeholder="Off" style="flex:1; background:#222; border:1px solid #555; color:white; padding:8px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.9rem;">
+                    </div>
+                </div>
+                
+                <div class="live-preview-box" style="padding: 5px; margin-top: 5px; margin-bottom: 5px;">
+                    <div style="font-size:0.7rem; color:#aaa;">Preview</div>
+                    <div id="rx-live-val" class="live-val" style="font-size: 1.2rem;">---</div>
+                </div>
+                <button class="action-btn btn-orange" onclick="setRxConfig()" style="padding: 10px; font-size: 0.9rem;">SET & SAVE (Current Slot)</button>
+                <div id="rx-config-status" style="font-size:0.75rem; color:#888; margin-top:4px; text-align:right;"></div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px;">
+                <button class="action-btn btn-gray" onclick="toggleFullscreen()">⛶ Toggle Fullscreen</button>
+            </div>
+            <div class="control-row" style="margin-top: 20px; border-top: 1px solid #444; padding-top: 10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px; text-align: center;">Config Backup</div>
+                <div style="display:flex; gap:10px;">
+                    <button class="action-btn btn-blue" onclick="exportConfig()" style="font-size:0.9rem;">⬇ Save Config</button>
+                    <button class="action-btn btn-orange" onclick="importConfig()" style="font-size:0.9rem;">⬆ Load Config</button>
+                </div>
+                <input type="file" id="import-file" accept=".json" onchange="handleFileSelect(this)" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
+            </div>
+            <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 4.0 (Group ID)<br>M5Atom S3 CAN</div>
+        </div>
+        <pre id="log">Logs...</pre>
+    </div>
+    <div id="icon-picker-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:20; justify-content:center; align-items:center;">
+        <div style="background:#222; padding:20px; border-radius:10px; border:1px solid #555; width:80%; max-width:300px;">
+            <div style="text-align:center; margin-bottom:15px; font-weight:bold;">Select Icon</div>
+            <div id="icon-picker-grid" style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px;"></div>
+            <div style="margin-top:15px; text-align:center;">
+                <button class="action-btn btn-gray" onclick="closeIconPicker()">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+        const TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+        const ICONS = {
+            none: null,
+            power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>',
+            light: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-8.5h-2v3h2V2zm4.25 4.42l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zm5.75 4.08h-3v2h3v-2zm-12 11V6.5h14V17c0 2.21-1.79 4-4 4h-6c-2.21 0-4-1.79-4-4z"/></svg>',
+            wiper: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M5 12l2-6 8 0 2 6"/><path d="M14 6l-2-3"/></svg>',
+            horn: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h2l5 5v-14l-5 5H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+            lock: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>',
+            music: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
+            fan: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19V14.2c-1.21-.63-2-2.16-2-3.2 0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.79 2.57-2 3.2v3.99c1.79-1.04 3-2.97 3-5.19z"/></svg>',
+            hazard: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+            setting: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84a.484.484 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0 .59-.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.27.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
+            engine: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>',
+            rain: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4.5 9c0-.8.7-1.5 1.5-1.5S7.5 8.2 7.5 9s-.7 1.5-1.5 1.5S4.5 9.8 4.5 9zm12 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 6c0-.8.7-1.5 1.5-1.5S7.5 14.2 7.5 15s-.7 1.5-1.5 1.5S4.5 15.8 4.5 15zm12 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5z"/></svg>',
+            menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
+            ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>',
+            fuel: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 14h-2V5c0-1.1-.9-2-2-2h-6c-1.1 0-2 .9-2 2v14h10v-5zM9 5h6v9H9V5zm-2 9H5V5h2v9zm13 8h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>',
+            temp: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5 5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-2z"/></svg>',
+            winch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v7"/><path d="M12 15v7"/><path d="M15 12h7"/><path d="M2 12h7"/></svg>'
+        };
+        let device, rxChar, txChar, gattServer;
+        
+        // --- BUTTON DATA STORAGE ---
+        let btnLabels = JSON.parse(localStorage.getItem("btnLabels")) || Array.from({ length: 8 }, (_, i) => `BTN ${i + 1}`);
+        let btnOnVals = JSON.parse(localStorage.getItem("btnOnVals")) || Array(8).fill('01');
+        let btnOffVals = JSON.parse(localStorage.getItem("btnOffVals")) || Array(8).fill('00');
+        let btnIcons = JSON.parse(localStorage.getItem("btnIcons")) || Array(8).fill('none');
+        let btnModes = JSON.parse(localStorage.getItem("btnModes")) || Array(8).fill('toggle');
+        let btnEndian = JSON.parse(localStorage.getItem("btnEndian")) || Array(8).fill('big');
+        let btnOnDelays = JSON.parse(localStorage.getItem("btnOnDelays")) || Array(8).fill(0);
+        let btnOffDelays = JSON.parse(localStorage.getItem("btnOffDelays")) || Array(8).fill(0);
+        // Ver 4.0: Biometric Auth per button
+        let btnAuth = JSON.parse(localStorage.getItem("btnAuth")) || Array(8).fill(false);
+        // Ver 4.1: Auth Credential ID (Local Registration)
+        let authCredentialId = localStorage.getItem("authCredentialId");
+        let btnColors = JSON.parse(localStorage.getItem("btnColors")) || Array(8).fill('#00FF00');
+        
+        let cfgVibe = JSON.parse(localStorage.getItem("cfgVibe")) !== false;
+        let cfgSound = JSON.parse(localStorage.getItem("cfgSound")) !== false;
+        let tempWarnVal = parseInt(localStorage.getItem("tempWarnVal")) || 950;
+        let lastTempWarnTime = 0;
+        let tempColor = localStorage.getItem("tempColor") || "#00FFFF";
+        
+        // --- MULTI-METER DATA STORAGE (NEW IN V3.8) ---
+        // Slots 0-6 represent Monitors 1-7 (Displayed as VAL, VAL2...VAL7)
+        // Default values provided for each slot
+        const DEFAULT_RX_CONFIG = {
+            mode: "1", mul: 1.0, add: 0, dec: 0, 
+            unit: "", label: "Monitor", color: "#FFD700", alarmMode: "high", warnVal: null 
+        };
+        
+        // ★ グループID (v4.0)
+        let grp1IdVal = localStorage.getItem("grp1IdVal") || "4E0";
+        let grp2IdVal = localStorage.getItem("grp2IdVal") || "4E1";
+
+        let rxConfigs = JSON.parse(localStorage.getItem("rxConfigs"));
+        if (!rxConfigs || !Array.isArray(rxConfigs) || rxConfigs.length < 7) {
+            const oldLbl = localStorage.getItem("rxLabel") || "RX Monitor";
+            rxConfigs = Array.from({length: 7}, (_, i) => ({
+                ...DEFAULT_RX_CONFIG, 
+                label: (i===0 ? oldLbl : `Monitor ${i+1}`)
+            }));
+        }
+        
+        let lastRxWarnTimes = Array(7).fill(0);
+        let currentRxSlot = 0; // Currently editing slot in Settings (0-6)
+
+        let audioCtx = null;
+        let btnStates = Array(8).fill(false);
+        let isConnected = false;
+        let lastPulseTimes = Array(8).fill(0);
+        let holdTimers = Array(8).fill(null);
+        let watchdogTimer = null;
+        const WATCHDOG_TIMEOUT = 3500;
+        let canIdVal = localStorage.getItem("canIdVal") || "100";
+        let kMeterIdVal = localStorage.getItem("kMeterIdVal") || "200";
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const cInput = document.getElementById("can-id-input"); if (cInput) cInput.value = canIdVal;
+            const kInput = document.getElementById("k-meter-id-input"); if (kInput) kInput.value = kMeterIdVal;
+            // ★ グループID初期化
+            const g1 = document.getElementById("grp1-id-input"); if (g1) { g1.value = grp1IdVal; updateGrpDec('grp1'); }
+            const g2 = document.getElementById("grp2-id-input"); if (g2) { g2.value = grp2IdVal; updateGrpDec('grp2'); }
+            const tInput = document.getElementById("temp-alarm-input");
+            if (tInput) {
+                tInput.value = tempWarnVal;
+                tInput.addEventListener('change', (e) => {
+                    let val = parseInt(e.target.value); if (isNaN(val)) val = 950;
+                    tempWarnVal = val; localStorage.setItem("tempWarnVal", tempWarnVal);
+                });
+            }
+            const tColInput = document.getElementById("temp-color-input");
+            if (tColInput) {
+                tColInput.value = tempColor;
+                tColInput.addEventListener('change', (e) => {
+                    tempColor = e.target.value; localStorage.setItem("tempColor", tempColor);
+                });
+            }
+            // Load initial RX Config UI for Slot 0
+            loadRxSlotFromUI();
+            updateLabelsOnMeterView();
+            // Inject Mic Button (Fix V3.81)
+            injectMicButton();
+        });
+
+        /* --- RX Config Logic (V3.8) --- */
+        function loadRxSlotFromUI() {
+            const sel = document.getElementById("rx-slot-select");
+            currentRxSlot = parseInt(sel.value);
+            const cfg = rxConfigs[currentRxSlot];
+            
+            document.getElementById("rx-mode-select").value = cfg.mode || "1";
+            document.getElementById("rx-mul-input").value = cfg.mul;
+            document.getElementById("rx-add-input").value = cfg.add;
+            document.getElementById("rx-dec-select").value = cfg.dec;
+            document.getElementById("rx-unit-input").value = cfg.unit;
+            document.getElementById("rx-label-input").value = cfg.label;
+            document.getElementById("rx-color-input").value = cfg.color;
+            document.getElementById("rx-alarm-mode-select").value = cfg.alarmMode;
+            document.getElementById("rx-alarm-input").value = (cfg.warnVal === null) ? "" : cfg.warnVal;
+            
+            document.getElementById("rx-config-status").textContent = "";
+        }
+        
+        function updateLabelsOnMeterView() {
+            // Update labels for Meter View based on stored configs
+            // Slot 0 -> meter-label-2, Slot 1 -> meter-label-3 ... Slot 6 -> meter-label-8
+            for(let i=0; i<7; i++) {
+                const el = document.getElementById(`meter-label-${i+2}`);
+                if(el) el.textContent = rxConfigs[i].label;
+            }
+        }
+
+        function setRxConfig() {
+            const cfg = rxConfigs[currentRxSlot];
+            
+            cfg.mode = document.getElementById("rx-mode-select").value;
+            cfg.mul  = parseFloat(document.getElementById("rx-mul-input").value) || 1.0;
+            cfg.add  = parseFloat(document.getElementById("rx-add-input").value) || 0;
+            cfg.dec  = parseInt(document.getElementById("rx-dec-select").value) || 0;
+            cfg.unit = document.getElementById("rx-unit-input").value || "";
+            cfg.label = document.getElementById("rx-label-input").value || `Monitor ${currentRxSlot+1}`;
+            cfg.color = document.getElementById("rx-color-input").value;
+            cfg.alarmMode = document.getElementById("rx-alarm-mode-select").value;
+            const wVal = parseFloat(document.getElementById("rx-alarm-input").value);
+            cfg.warnVal = isNaN(wVal) ? null : wVal;
+
+            localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs));
+            updateLabelsOnMeterView();
+            
+            const statusEl = document.getElementById("rx-config-status");
+
+            // ★ SET_SLOT_MODE=slot,mode でModeのみ送信
+            const cmd = `SET_SLOT_MODE=${currentRxSlot},${cfg.mode}`;
+            log("TX SlotMode: " + cmd);
+
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode(cmd))
+                    .then(() => { 
+                        if (statusEl) { 
+                            statusEl.textContent = `📡 Sent Slot ${currentRxSlot+1} Mode!`; 
+                            statusEl.style.color = "#74c0fc"; 
+                        } 
+                    })
+                    .catch(e => { 
+                        if (statusEl) { 
+                            statusEl.textContent = "❌ Send failed"; 
+                            statusEl.style.color = "#ff6b6b"; 
+                        } 
+                    });
+            } else {
+                if (statusEl) { 
+                    statusEl.textContent = `✅ Saved locally (Not Connected)`; 
+                    statusEl.style.color = "#ffc107"; 
+                }
+            }
+        }
+
+        /* --- Config UI Generation --- */
+        function renderConfigList() {
+            // Update Bio Status UI
+            const st = document.getElementById("bio-status");
+            const btnReg = document.getElementById("btn-bio-reg");
+            const btnClear = document.getElementById("btn-bio-clear");
+            if (st && btnReg && btnClear) {
+                if (authCredentialId) {
+                    st.textContent = "✅ Registered"; st.style.color = "#28a745";
+                    btnReg.style.display = "none"; btnClear.style.display = "block";
+                } else {
+                    st.textContent = "⚠️ Not Registered"; st.style.color = "#ffc107";
+                    btnReg.style.display = "block"; btnClear.style.display = "none";
+                }
+            }
+            const container = document.getElementById('config-list-container');
+            container.innerHTML = '';
+            btnLabels.forEach((label, i) => {
+                const row = document.createElement('div');
+                row.className = 'config-row';
+                const isMom = (btnModes[i] === 'momentary');
+                const color = btnColors[i];
+                const endian = btnEndian[i];
+                const icon = btnIcons[i];
+                const isAuth = btnAuth[i]; // Ver 4.0
+                row.innerHTML = `
+                <div style="display:flex; flex-direction:column; gap:2px; align-items:center;">
+                  <button class="mini-opt" style="width:30px; height:30px; border:1px solid #555; padding:2px;" onclick="openIconPicker(${i})">
+                    ${(icon !== 'none' && ICONS[icon]) ? ICONS[icon] : '<span style="font-size:0.8rem;">Icon</span>'}
+                  </button>
+                  <input type="color" value="${color}" onchange="updateBtnColor(${i}, this.value)" style="width:30px; height:20px; border:none; background:none; cursor:pointer;">
+                </div>
+                <input type="text" class="config-name-input" value="${label}" maxlength="12" onchange="updateBtnLabel(${i}, this.value)">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <div style="display:flex; gap:2px; align-items:center;">
+                    <span style="font-size:0.7rem; color:#aaa;">ON:0x</span>
+                    <input type="text" value="${btnOnVals[i]}" maxlength="2" onchange="updateBtnVal(${i}, 'on', this.value)" style="width:40px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:16px;">
+                  </div>
+                   <div style="display:flex; gap:2px; align-items:center;">
+                    <span style="font-size:0.7rem; color:#aaa;">OFF:0x</span>
+                    <input type="text" value="${btnOffVals[i]}" maxlength="2" onchange="updateBtnVal(${i}, 'off', this.value)" style="width:40px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:16px;">
+                    </div>
+                 </div>
+                 <button class="action-btn btn-orange" style="padding: 5px 10px; font-size: 0.8rem; width: auto;" onclick="saveBtnConfig(${i})">SET</button>
+                 <div style="display:flex; flex-direction:column; gap:2px; margin-left:5px;">
+                   <div style="display:flex; gap:2px; align-items:center;">
+                     <span style="font-size:0.7rem; color:#aaa;">OnDly</span>
+                     <input type="number" value="${btnOnDelays[i]}" step="0.1" min="0" onchange="updateBtnDelay(${i}, 'on', this.value)" style="width:50px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:14px;">
+                   </div>
+                   <div style="display:flex; gap:2px; align-items:center;">
+                     <span style="font-size:0.7rem; color:#aaa;">OffDly</span>
+                     <input type="number" value="${btnOffDelays[i]}" step="0.1" min="0" onchange="updateBtnDelay(${i}, 'off', this.value)" style="width:50px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:14px;">
+                   </div>
+                 </div>
+                <div class="mini-switch">
+                    <button class="mini-opt ${!isMom ? 'selected' : ''}" onclick="changeBtnMode(${i}, 'toggle')">Tog</button>
+                    <button class="mini-opt ${isMom ? 'selected' : ''}" onclick="changeBtnMode(${i}, 'momentary')">Pul</button>
+                </div>
+                 <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+                   <span style="font-size:0.6rem; color:#888;">Endian</span>
+                   <div class="mini-switch">
+                     <button class="mini-opt ${endian === 'big' ? 'selected' : ''}" onclick="updateBtnEndian(${i}, 'big')">B</button>
+                     <button class="mini-opt ${endian === 'little' ? 'selected' : ''}" onclick="updateBtnEndian(${i}, 'little')">L</button>
+                   </div>
+                 </div>
+                 <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+                   <span style="font-size:0.6rem; color:#888;">${isAuth ? 'Lock' : 'Unlock'}</span>
+                   <button class="mini-opt ${isAuth ? 'selected' : ''}" style="width:30px; height:30px; border:1px solid #555; padding:2px;" onclick="toggleBtnAuth(${i})">
+                      ${isAuth ? '🔒' : '🔓'}
+                   </button>
+                 </div>
+            `;
+                container.appendChild(row);
+            });
+        }
+        function changeBtnMode(index, mode) { btnModes[index] = mode; localStorage.setItem("btnModes", JSON.stringify(btnModes)); renderConfigList(); }
+        function updateBtnLabel(index, newName) { btnLabels[index] = newName; localStorage.setItem("btnLabels", JSON.stringify(btnLabels)); const labelSpan = document.getElementById(`label-${index + 1}`); if (labelSpan) labelSpan.textContent = newName; }
+        function updateBtnVal(index, type, val) {
+            if (!/^[0-9A-Fa-f]{1,2}$/.test(val)) { alert("Invalid Hex"); renderConfigList(); return; }
+            val = val.toUpperCase().padStart(2, '0');
+            if (type === 'on') { btnOnVals[index] = val; localStorage.setItem("btnOnVals", JSON.stringify(btnOnVals)); } else { btnOffVals[index] = val; localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
+        }
+        async function syncAllBtnConfigs() {
+            if (!rxChar) return;
+            const overlay = document.getElementById("sync-overlay"); if (overlay) overlay.style.display = "flex";
+            log("Syncing Config to Device...");
+            for (let i = 0; i < 8; i++) { 
+                sendBtnConfig(i); 
+                await new Promise(r => setTimeout(r, 150)); 
+            }
+            if (overlay) overlay.style.display = "none"; log("Config Sync Complete");
+            // ★ syncAllBtnConfigs完了後にSTATE=を再要求してボタン表示を正しく復元
+            await new Promise(r => setTimeout(r, 300));
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode("REQUEST_STATE")).catch(()=>{});
+                log("Requested STATE refresh");
+            }
+        }
+        function saveBtnConfig(index) { sendBtnConfig(index); alert(`Button ${index + 1} のON/OFF設定をデバイスに保存しました。`); }
+        function sendBtnConfig(inIdx) {
+            if (!rxChar) return;
+            const onVal = parseInt(btnOnVals[inIdx], 16);
+            const offVal = parseInt(btnOffVals[inIdx], 16);
+            if (isNaN(onVal) || isNaN(offVal)) return;
+            const cmd = `CFGBTN=${inIdx},${onVal},${offVal}`;
+            rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => console.log("TX Config Err"));
+        }
+        function updateBtnDelay(index, type, val) {
+            let v = parseFloat(val); if (isNaN(v) || v < 0) v = 0;
+            if (type === 'on') { btnOnDelays[index] = v; localStorage.setItem("btnOnDelays", JSON.stringify(btnOnDelays)); } else { btnOffDelays[index] = v; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
+        }
+        function updateBtnColor(index, newColor) { btnColors[index] = newColor; localStorage.setItem("btnColors", JSON.stringify(btnColors)); const btn = document.getElementById(`btn-${index + 1}`); if (btn) { btn.style.setProperty('--btn-color', newColor); } }
+        function updateBtnEndian(index, mode) { btnEndian[index] = mode; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
+        function applyPreset(type) { if (type === 'normal') { btnEndian = Array(8).fill('big'); } else { btnEndian = Array(8).fill('little'); } localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
+        
+        /* --- Auth Logic (Ver 4.0) --- */
+        async function toggleBtnAuth(index) {
+            // Ver 4.2: Require Auth to Unlock
+            if (btnAuth[index]) {
+                const authResult = await checkBiometricAuth();
+                if (!authResult) { alert("🔒 Authentication Failed. Cannot Unlock."); return; }
+            }
+            btnAuth[index] = !btnAuth[index];
+            localStorage.setItem("btnAuth", JSON.stringify(btnAuth));
+            renderConfigList();
+        }
+        // Converts an ArrayBuffer to a Base64 URL-safe string
+        function bufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer); let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) { binary += String.fromCharCode(bytes[i]); }
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        // Converts a Base64 URL-safe string to an ArrayBuffer
+        function base64ToBuffer(base64) {
+            const binary = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+            return bytes.buffer;
+        }
+        async function registerBiometric() {
+            if (!window.PublicKeyCredential) { alert("WebAuthn not supported."); return; }
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const publicKey = {
+                    challenge: challenge,
+                    rp: { name: "M5Atom CAN Keypad", id: window.location.hostname },
+                    user: { id: new Uint8Array(16), name: "user@local", displayName: "Local User" },
+                    pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
+                    authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+                    timeout: 60000, attestation: "none"
+                };
+                const credential = await navigator.credentials.create({ publicKey });
+                const credId = bufferToBase64(credential.rawId);
+                localStorage.setItem("authCredentialId", credId);
+                authCredentialId = credId;
+                alert("Biometric Registered Successfully! 🔓 -> 🔒");
+                renderConfigList();
+            } catch (err) { console.error("Registration failed", err); alert("Registration Failed: " + err.message); }
+        }
+        async function clearBiometric() {
+            const authResult = await checkBiometricAuth();
+            if (!authResult) { alert("🔒 Authentication Failed. Cannot Clear."); return; }
+            if (confirm("Clear registered biometric data?")) {
+                localStorage.removeItem("authCredentialId"); authCredentialId = null; renderConfigList();
+            }
+        }
+        async function checkBiometricAuth() {
+            if (!window.PublicKeyCredential) { alert("Biometric authentication not supported on this device/browser."); return false; }
+            if (!authCredentialId) { alert("Biometric not registered. Please register in Settings."); return false; }
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const opts = {
+                    challenge: challenge, timeout: 60000, userVerification: "required",
+                    rpId: window.location.hostname,
+                    allowCredentials: [{ id: base64ToBuffer(authCredentialId), type: 'public-key', transports: ['internal'] }]
+                };
+                const credential = await navigator.credentials.get({ publicKey: opts });
+                if (credential) { return true; }
+            } catch (err) { console.error("Auth failed", err); }
+            return false;
+        }
+        
+        function setVibe(state) { cfgVibe = state; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
+        function setSound(state) { cfgSound = state; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); if (state) initAudio(); }
+        
+        let currentIconBtnIndex = -1;
+        function openIconPicker(index) {
+            currentIconBtnIndex = index; const overlay = document.getElementById('icon-picker-overlay'); const grid = document.getElementById('icon-picker-grid');
+            let html = `<button onclick="selectIcon('none')" style="padding:10px; background:#444; border:none; color:white; border-radius:5px;">TXT</button>`;
+            for (const [key, svg] of Object.entries(ICONS)) { if (key === 'none') continue; html += `<button onclick="selectIcon('${key}')" style="padding:5px; background:none; border:1px solid #444; color:white; border-radius:5px; height:40px; width:40px;">${svg}</button>`; }
+            grid.innerHTML = html; overlay.style.display = 'flex';
+        }
+        function closeIconPicker() { document.getElementById('icon-picker-overlay').style.display = 'none'; }
+        function selectIcon(iconKey) { if (currentIconBtnIndex >= 0) { btnIcons[currentIconBtnIndex] = iconKey; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); renderConfigList(); renderKeypadGrid(); closeIconPicker(); } }
+        let wakeLock = null;
+        async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); console.log('Wake Lock is active!'); wakeLock.addEventListener('release', () => { console.log('Wake Lock released'); }); } } catch (err) { console.error(`Wake Lock Error: ${err.name}, ${err.message}`); } }
+        document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') { await requestWakeLock(); } });
+        function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } else if (audioCtx.state === 'suspended') { audioCtx.resume(); } }
+        function triggerFeedback() { if (cfgVibe && navigator.vibrate) { navigator.vibrate(15); } if (cfgSound && audioCtx) { const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination); osc.type = 'square'; osc.frequency.value = 2000; gain.gain.setValueAtTime(0.1, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.05); } }
+        function toggleFullscreen() { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(e => { }); } else { if (document.exitFullscreen) { document.exitFullscreen(); } } }
+        function enterFullscreen() { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(e => { }); } }
+        function showMain() { document.getElementById("view-settings").style.display = "none"; document.getElementById("view-meter").style.display = "none"; document.getElementById("view-settings").classList.remove("active"); document.getElementById("view-meter").classList.remove("active"); const v = document.getElementById("view-main"); v.style.display = "flex"; v.classList.add("active"); }
+        function showMeter() { document.getElementById("view-main").style.display = "none"; document.getElementById("view-settings").style.display = "none"; document.getElementById("view-main").classList.remove("active"); document.getElementById("view-settings").classList.remove("active"); const v = document.getElementById("view-meter"); v.style.display = "flex"; v.classList.add("active"); }
+        function showSettings() { renderConfigList(); loadRxSlotFromUI(); document.getElementById("view-main").style.display = "none"; document.getElementById("view-meter").style.display = "none"; document.getElementById("view-main").classList.remove("active"); document.getElementById("view-meter").classList.remove("active"); const v = document.getElementById("view-settings"); v.style.display = "flex"; v.classList.add("active"); }
+        function log(t) { const el = document.getElementById("log"); const time = new Date().toLocaleTimeString().split(' ')[0]; el.textContent = `[${time}] ${t}\n` + el.textContent.substring(0, 1000); }
+        function updateStatus(connected) {
+            isConnected = connected; const ind = document.getElementById("status-display"); const overlay = document.getElementById("connect-overlay"); const keypad = document.getElementById("keypad"); const discRow = document.getElementById("disconnect-row");
+            if (connected) { ind.textContent = "🟢 BLE"; ind.classList.add("connected"); overlay.style.display = "none"; keypad.classList.add("visible"); discRow.style.display = "flex"; resetWatchdog(); document.getElementById("can-status-display").style.display = "block"; updateMainSoundIcon(); } else { ind.textContent = "🔴 Disconnected"; ind.classList.remove("connected"); ind.classList.remove("stalled"); overlay.style.display = "flex"; keypad.classList.remove("visible"); discRow.style.display = "none"; document.getElementById("can-status-display").style.display = "none"; clearTimeout(watchdogTimer); }
+        }
+        function resetWatchdog() { if (!isConnected) return; const ind = document.getElementById("status-display"); if (ind.textContent.includes("No Resp")) { ind.textContent = "🟢 BLE"; ind.style.color = "#00ff00"; ind.style.borderColor = "#00ff00"; ind.classList.remove("stalled"); ind.classList.add("connected"); } clearTimeout(watchdogTimer); watchdogTimer = setTimeout(() => { ind.textContent = "⚠️ No Resp"; ind.style.color = "orange"; ind.style.borderColor = "orange"; ind.classList.remove("connected"); ind.classList.add("stalled"); }, WATCHDOG_TIMEOUT); }
+        function updateCanStatus(st) { const el = document.getElementById("can-status-display"); if (!el) return; if (el.style.display === "none") el.style.display = "block"; if (st === "CAN_OK") { el.textContent = "CAN: OK"; el.className = "status-indicator can-ok"; el.style.color = "#00ff00"; el.style.borderColor = "#00ff00"; } else { el.textContent = "CAN: ERR"; el.className = "status-indicator can-err"; el.style.color = "#ff0000"; el.style.borderColor = "#ff0000"; } }
+        async function handleStartConnect() { initAudio(); enterFullscreen(); requestWakeLock(); await connect(); }
+        async function connect() {
+            try {
+                device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'M5' }], optionalServices: [SERVICE_UUID] });
+                gattServer = await device.gatt.connect(); device.addEventListener('gattserverdisconnected', () => { log("Disconnected Event"); updateStatus(false); });
+                const svc = await gattServer.getPrimaryService(SERVICE_UUID); rxChar = await svc.getCharacteristic(RX_UUID); txChar = await svc.getCharacteristic(TX_UUID);
+                await txChar.startNotifications(); txChar.addEventListener('characteristicvaluechanged', handleNotifications);
+                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500);
+            } catch (e) { log("Err: " + e); updateStatus(false); }
+        }
+        function disconnect() { if (device && device.gatt.connected) { device.gatt.disconnect(); updateStatus(false); } }
+        
+        // --- METER UPDATE LOGIC ---
+        // ★ 桁数に応じてメータ数値フォントサイズを自動調整
+        function adjustMeterFontSize(el) {
+            const len = el.textContent.replace('-', '').replace('.', '').length;
+            let size;
+            if      (len <= 2) size = 'clamp(2.2rem, 9vw, 3.8rem)';
+            else if (len <= 3) size = 'clamp(2.0rem, 8vw, 3.2rem)';
+            else if (len <= 4) size = 'clamp(1.7rem, 7vw, 2.8rem)';
+            else if (len <= 5) size = 'clamp(1.4rem, 6vw, 2.3rem)';
+            else if (len <= 6) size = 'clamp(1.2rem, 5vw, 1.9rem)';
+            else               size = 'clamp(1.0rem, 4vw, 1.5rem)';
+            el.style.fontSize = size;
+        }
+
+        function updateMeterValue(elId, unitId, rawVal, cfgSlotIdx) {
+            // Get config for this slot
+            const cfg = rxConfigs[cfgSlotIdx];
+            if(!cfg) return;
+
+            let signedVal = rawVal;
+            if (cfg.mode == 3) { if (signedVal & 0x80) signedVal -= 0x100; }
+            else if (cfg.mode == 4 || cfg.mode == 5) { if (signedVal & 0x8000) signedVal -= 0x10000; }
+
+            const calcVal = (signedVal * cfg.mul) + cfg.add;
+            const dispVal = calcVal.toFixed(cfg.dec);
+
+            const el = document.getElementById(elId);
+            const unitEl = document.getElementById(unitId);
+            
+            if (el) {
+                el.textContent = dispVal;
+                adjustMeterFontSize(el);  // ★ 桁数に応じてフォントサイズ自動調整
+                let isAlarm = false;
+                if (cfg.warnVal !== null && !isNaN(cfg.warnVal)) {
+                    if (cfg.alarmMode === 'low') { if (calcVal <= cfg.warnVal) isAlarm = true; }
+                    else { if (calcVal >= cfg.warnVal) isAlarm = true; }
+                }
+                
+                if (isAlarm) {
+                    el.style.color = "#FF0000";
+                    el.classList.add("temp-warning");
+                    el.classList.remove("val-yellow"); el.classList.remove("val-gray"); el.classList.add("val-red");
+                    
+                    if (Date.now() - lastRxWarnTimes[cfgSlotIdx] > 5000) {
+                        speakVoice(cfg.label + "、警告！");
+                        lastRxWarnTimes[cfgSlotIdx] = Date.now();
+                    }
+                } else {
+                    el.style.color = cfg.color;
+                    el.classList.remove("temp-warning"); el.classList.remove("val-red"); el.classList.remove("val-gray");
+                    el.style.textShadow = `0 0 10px ${cfg.color}66`;
+                }
+            }
+            if (unitEl) unitEl.textContent = cfg.unit;
+            return { disp: dispVal, raw: rawVal };
+        }
+
+        function handleNotifications(event) {
+            const decoder = new TextDecoder('utf-8'); const cmd = decoder.decode(event.target.value); const cleanedCmd = cmd.replace(/(\r\n|\n|\r)/gm, "").trim(); log("RX: " + cleanedCmd); resetWatchdog();
+            
+            if (cleanedCmd.startsWith("ID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync ID: " + val); canIdVal = val; localStorage.setItem("canIdVal", canIdVal); const el = document.getElementById("can-id-input"); if (el) el.value = canIdVal; }
+            else if (cleanedCmd.startsWith("KID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync KID: " + val); kMeterIdVal = val; localStorage.setItem("kMeterIdVal", kMeterIdVal); const el = document.getElementById("k-meter-id-input"); if (el) el.value = kMeterIdVal; }
+            // ★ グループID確認受信
+            else if (cleanedCmd.startsWith("GRP1=")) {
+                const val = cleanedCmd.split("=")[1].replace("0x","").replace("0X","").toUpperCase();
+                grp1IdVal = val; localStorage.setItem("grp1IdVal", val);
+                const el = document.getElementById("grp1-id-input"); if(el){ el.value = val; updateGrpDec('grp1'); }
+                const st = document.getElementById("grp-status"); if(st){ st.textContent = "✅ GRP1 confirmed: 0x"+val; st.style.color="#51cf66"; }
+                log("Sync GRP1: " + val);
+            }
+            else if (cleanedCmd.startsWith("GRP2=")) {
+                const val = cleanedCmd.split("=")[1].replace("0x","").replace("0X","").toUpperCase();
+                grp2IdVal = val; localStorage.setItem("grp2IdVal", val);
+                const el = document.getElementById("grp2-id-input"); if(el){ el.value = val; updateGrpDec('grp2'); }
+                const st = document.getElementById("grp-status"); if(st){ st.textContent = "✅ GRP2 confirmed: 0x"+val; st.style.color="#51cf66"; }
+                log("Sync GRP2: " + val);
+            }
+            else if (cleanedCmd.startsWith("SLOT_MODE_OK=")) {
+                log("✅ SlotMode confirmed: " + cleanedCmd.split("=")[1]);
+                const statusEl = document.getElementById("rx-config-status");
+                if(statusEl){ statusEl.textContent = "✅ "+cleanedCmd; statusEl.style.color="#51cf66"; }
+            }
+            
+            // --- VALS: 全スロット一括受信 (V7.7) ---
+            else if (cleanedCmd.startsWith("VALS=")) {
+                const parts = cleanedCmd.substring(5).split(",");
+                for (let i = 0; i < 7 && i < parts.length; i++) {
+                    if (parts[i] === "") continue;
+                    const raw = parseInt(parts[i]);
+                    if (isNaN(raw)) continue;
+                    const mIdx = i + 2;
+                    const res = updateMeterValue(`meter-val-${mIdx}`, `meter-unit-${mIdx}`, raw, i);
+                    if (currentRxSlot === i) {
+                        document.getElementById("rx-live-val").textContent = res.disp;
+                    }
+                }
+            }
+                        // --- METER UPDATES (Using Array Config) ---
+            else if (cleanedCmd.startsWith("VAL=")) {
+                let raw = parseInt(cleanedCmd.split("=")[1]);
+                const res = updateMeterValue("meter-val-2", "meter-unit-2", raw, 0); // Slot 0
+                // Live preview logic only for currently selected slot in config
+                if (currentRxSlot === 0) {
+                    document.getElementById("rx-live-val").textContent = res.disp;
+                }
+            }
+            // Handling VAL2 through VAL7
+            else if (cleanedCmd.match(/^VAL[2-7]=/)) {
+                const parts = cleanedCmd.split("=");
+                const key = parts[0];
+                const raw = parseInt(parts[1]);
+                const slotNum = parseInt(key.replace("VAL", "")); // 2...7
+                const arrIdx = slotNum - 1; // 1...6 (Slot 1-6 in array)
+                const res = updateMeterValue(`meter-val-${slotNum+1}`, `meter-unit-${slotNum+1}`, raw, arrIdx);
+                
+                if (currentRxSlot === arrIdx) {
+                    document.getElementById("rx-live-val").textContent = res.disp;
+                }
+            }
+
+            // --- Exhaust Temp (Fixed) ---
+            else if (cleanedCmd.startsWith("TEMP=")) {
+                const val = cleanedCmd.split("=")[1]; const el = document.getElementById("meter-val-1");
+                if (el) {
+                    el.textContent = val; let tempVal = parseInt(val);
+                    let isAlarm = (!isNaN(tempVal) && tempVal >= tempWarnVal);
+                    if (isAlarm) { 
+                        el.classList.add("temp-warning"); el.classList.remove("val-cyan"); el.classList.add("val-red");
+                        el.style.color = "#FF0000";
+                        if (Date.now() - lastTempWarnTime > 5000) { speakVoice("排気温度、警告！"); lastTempWarnTime = Date.now(); } 
+                    } else { 
+                        el.classList.remove("temp-warning"); el.classList.remove("val-red");
+                        el.style.color = tempColor; el.style.textShadow = `0 0 10px ${tempColor}66`;
+                    }
+                }
+            }
+            else if (cleanedCmd.startsWith("STATE=")) {
+                const states = cleanedCmd.substring(6).split(',');
+                if (states.length >= 8) {
+                    const now = Date.now();
+                    for (let i = 0; i < 8; i++) {
+                        const s = states[i]; if (s === undefined) continue;
+                        if (btnModes[i] === 'momentary') { if (now - lastPulseTimes[i] < 500) { continue; } }
+                        let receivedVal = parseInt(s, 10); if (btnEndian[i] === 'little') { receivedVal = reverseBits(receivedVal); }
+                        const onVal = parseInt(btnOnVals[i], 16); btnStates[i] = (receivedVal === onVal); updateBtnVisual(i + 1, btnStates[i]);
+                    }
+                }
+            }
+            else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
+        }
+        function updateBtnVisual(n, isActive) { const btn = document.getElementById('btn-' + n); if (!btn) return; if (isActive) { btn.classList.add('active'); } else { btn.classList.remove('active'); } }
+        function sendState(n, state) {
+            const btnIndex = n - 1; btnStates[btnIndex] = state; updateBtnVisual(n, state);
+            if (rxChar) {
+                const valStr = state ? btnOnVals[btnIndex] : btnOffVals[btnIndex]; let valInt = parseInt(valStr, 16);
+                if (btnEndian[btnIndex] === 'little') { valInt = reverseBits(valInt); }
+                const targetN = btnIndex + 1; const cmd = `${targetN}=${valInt}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => { });
+            }
+        }
+        function reverseBits(b) { b = b & 0xFF; let r = 0; for (let i = 0; i < 8; i++) { if ((b >> i) & 1) { r |= 1 << (7 - i); } } return r; }
+        async function handlePointerDown(n, e) {
+            if (e) { e.preventDefault(); } triggerFeedback(); const btnEl = document.getElementById(`btn-${n}`); if (btnEl) btnEl.classList.add('pressing'); const idx = n - 1;
+            // Ver 4.0: Check Biometric Auth
+            if (btnAuth[idx]) {
+                const authResult = await checkBiometricAuth();
+                if (!authResult) {
+                    if (btnEl) btnEl.classList.remove('pressing');
+                    alert("🔒 Authentication Failed");
+                    return;
+                }
+            }
+            const currentState = btnStates[idx]; const targetState = !currentState; const delay = targetState ? btnOnDelays[idx] : btnOffDelays[idx];
+            if (delay > 0) { holdTimers[idx] = setTimeout(() => { executeAction(n); holdTimers[idx] = null; if (btnEl) btnEl.classList.remove('pressing'); }, delay * 1000); } else { executeAction(n); if (btnEl) btnEl.classList.remove('pressing'); }
+        }
+        function handlePointerUp(n, e) { if (e) e.preventDefault(); const idx = n - 1; if (holdTimers[idx]) { clearTimeout(holdTimers[idx]); holdTimers[idx] = null; } const btnEl = document.getElementById(`btn-${n}`); if (btnEl) btnEl.classList.remove('pressing'); }
+        function executeAction(n) { const idx = n - 1; const isMomentary = (btnModes[idx] === 'momentary'); if (isMomentary) { triggerPulse(n); } else { const newState = !btnStates[idx]; sendState(n, newState); } }
+        function triggerPulse(n) { const idx = n - 1; sendState(n, true); setTimeout(() => { sendState(n, false); }, 150); lastPulseTimes[idx] = Date.now(); }
+        
+        function setCanId() { 
+            const el = document.getElementById("can-id-input"); const val = el.value; 
+            if (val.match(/^[0-9A-Fa-f]+$/)) { 
+                log(`Set CAN ID: 0x${val}`); localStorage.setItem("canIdVal", val); canIdVal = val; 
+                if (rxChar) { const cmd = `ID=${val}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => log("TX ERR ID")); } 
+            } else { alert("Invalid Hex ID"); } 
+        }
+        function setKMeterId() { 
+            const el = document.getElementById("k-meter-id-input"); const val = el.value; 
+            if (val.match(/^[0-9A-Fa-f]+$/)) { 
+                log(`Set K-Meter ID: 0x${val}`); localStorage.setItem("kMeterIdVal", val); kMeterIdVal = val; 
+                if (rxChar) { const cmd = `KID=${val}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => log("TX ERR KID")); } 
+            } else { alert("Invalid Hex ID"); } 
+        }
+
+        // ★ グループID設定 (v4.0)
+        function updateGrpDec(grp) {
+            const el = document.getElementById(`${grp}-id-input`);
+            const dec = document.getElementById(`${grp}-dec-display`);
+            if (!el || !dec) return;
+            const v = parseInt(el.value, 16);
+            dec.textContent = isNaN(v) ? "" : `(${v})`;
+        }
+        function autoFillGrp2() {
+            const g1el = document.getElementById("grp1-id-input");
+            const g2el = document.getElementById("grp2-id-input");
+            if (!g1el || !g2el) return;
+            const v = parseInt(g1el.value, 16);
+            if (isNaN(v)) return;
+            const base = (v % 2 === 0) ? v : v + 1;
+            if (base !== v) { g1el.value = base.toString(16).toUpperCase(); updateGrpDec('grp1'); }
+            g2el.value = (base + 1).toString(16).toUpperCase();
+            updateGrpDec('grp2');
+        }
+        function setGroups() {
+            const g1 = document.getElementById("grp1-id-input").value.trim();
+            const g2 = document.getElementById("grp2-id-input").value.trim();
+            if (!g1.match(/^[0-9A-Fa-f]+$/) || !g2.match(/^[0-9A-Fa-f]+$/)) {
+                alert("Invalid Hex ID"); return;
+            }
+            grp1IdVal = g1.toUpperCase(); grp2IdVal = g2.toUpperCase();
+            localStorage.setItem("grp1IdVal", grp1IdVal);
+            localStorage.setItem("grp2IdVal", grp2IdVal);
+            updateGrpDec('grp1'); updateGrpDec('grp2');
+            const cmd = `SET_GROUPS=${g1},${g2}`;
+            log("TX Groups: " + cmd);
+            const st = document.getElementById("grp-status");
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode(cmd))
+                    .then(() => { if(st){ st.textContent="📡 Sent! Waiting confirm..."; st.style.color="#74c0fc"; } })
+                    .catch(() => { if(st){ st.textContent="❌ Send failed"; st.style.color="#ff6b6b"; } });
+            } else {
+                if(st){ st.textContent="✅ Saved locally (Not Connected)"; st.style.color="#ffc107"; }
+            }
+        }
+        function exportConfig() {
+            const config = { version: "4.0.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs, grp1Id: grp1IdVal, grp2Id: grp2IdVal };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
+        }
+        function importConfig() {
+            // showOpenFilePicker が使える場合 (Chrome 86+) はそちらを優先
+            if (window.showOpenFilePicker) {
+                window.showOpenFilePicker({
+                    types: [{ description: 'Config JSON', accept: { 'application/json': ['.json'] } }],
+                    multiple: false
+                }).then(async ([fh]) => {
+                    const file = await fh.getFile();
+                    const text = await file.text();
+                    handleFileText(text);
+                }).catch(e => { if (e.name !== 'AbortError') { log('Load Err: ' + e); alert('ファイルを開けませんでした'); } });
+            } else {
+                // fallback: 通常のfile input
+                document.getElementById('import-file').click();
+            }
+        }
+        function handleFileSelect(input) {
+            const file = input.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => { handleFileText(e.target.result); };
+            reader.readAsText(file); input.value = '';
+        }
+        function handleFileText(text) {
+            try {
+                    const config = JSON.parse(text);
+                    if (config.btnLabels) { btnLabels = config.btnLabels; localStorage.setItem("btnLabels", JSON.stringify(btnLabels)); }
+                    if (config.btnModes) { btnModes = config.btnModes; localStorage.setItem("btnModes", JSON.stringify(btnModes)); }
+                    if (config.btnColors) { btnColors = config.btnColors; localStorage.setItem("btnColors", JSON.stringify(btnColors)); }
+                    if (config.btnOnVals) { btnOnVals = config.btnOnVals; localStorage.setItem("btnOnVals", JSON.stringify(btnOnVals)); }
+                    if (config.btnOffVals) { btnOffVals = config.btnOffVals; localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
+                    if (config.btnEndian) { btnEndian = config.btnEndian; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); }
+                    if (config.btnIcons) { btnIcons = config.btnIcons; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); }
+                    if (config.btnAuth) { btnAuth = config.btnAuth; localStorage.setItem("btnAuth", JSON.stringify(btnAuth)); }
+                    if (config.cfgVibe !== undefined) { cfgVibe = config.cfgVibe; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
+                    if (config.cfgSound !== undefined) { cfgSound = config.cfgSound; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); }
+                    if (config.canId) { document.getElementById("can-id-input").value = config.canId; canIdVal = config.canId; localStorage.setItem("canIdVal", canIdVal); }
+                    if (config.kMeterId) { document.getElementById("k-meter-id-input").value = config.kMeterId; kMeterIdVal = config.kMeterId; localStorage.setItem("kMeterIdVal", kMeterIdVal); }
+                    if (config.tempWarnVal) { tempWarnVal = config.tempWarnVal; localStorage.setItem("tempWarnVal", tempWarnVal); document.getElementById("temp-alarm-input").value = tempWarnVal; }
+                    if (config.tempColor) { tempColor = config.tempColor; localStorage.setItem("tempColor", tempColor); document.getElementById("temp-color-input").value = tempColor; }
+                    if (config.btnOnDelays) { btnOnDelays = config.btnOnDelays; localStorage.setItem("btnOnDelays", JSON.stringify(btnOnDelays)); }
+                    if (config.btnOffDelays) { btnOffDelays = config.btnOffDelays; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
+                    
+                    if (config.rxConfigs) { rxConfigs = config.rxConfigs; localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs)); }
+                    if (config.grp1Id) { grp1IdVal = config.grp1Id; localStorage.setItem("grp1IdVal", grp1IdVal); const el=document.getElementById("grp1-id-input"); if(el){el.value=grp1IdVal; updateGrpDec('grp1');} }
+                    if (config.grp2Id) { grp2IdVal = config.grp2Id; localStorage.setItem("grp2IdVal", grp2IdVal); const el=document.getElementById("grp2-id-input"); if(el){el.value=grp2IdVal; updateGrpDec('grp2');} }
+
+                    log("Config Loaded"); alert("Configuration Loaded Successfully"); renderConfigList(); renderKeypadGrid(); loadRxSlotFromUI(); updateLabelsOnMeterView();
+                } catch (err) { log("Import Err: " + err); alert("Failed to load config: " + err); }
+        }
+        function renderKeypadGrid() {
+            const container = document.getElementById("keypad"); container.innerHTML = "";
+            for (let i = 1; i <= 8; i++) {
+                const b = document.createElement("div"); b.id = `btn-${i}`; b.className = "key-btn";
+                const iconKey = btnIcons[i - 1]; let innerHTML = '';
+                if (iconKey && iconKey !== 'none' && ICONS[iconKey]) { innerHTML = `<div style="width:50%; height:50%; margin-bottom:5px;">${ICONS[iconKey]}</div><span id="label-${i}" class="btn-label" style="font-size:0.9rem;">${btnLabels[i - 1]}</span>`; } else { innerHTML = `<span id="label-${i}" class="btn-label">${btnLabels[i - 1]}</span>`; }
+                b.innerHTML = innerHTML; b.style.setProperty('--btn-color', btnColors[i - 1]);
+                b.addEventListener('pointerdown', (e) => handlePointerDown(i, e)); b.addEventListener('pointerup', (e) => handlePointerUp(i, e)); b.addEventListener('pointerleave', (e) => handlePointerUp(i, e));
+                b.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false }); b.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); return false; }); container.appendChild(b);
+            }
+        }
+        window.addEventListener('contextmenu', (e) => { if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) { return true; } e.preventDefault(); return false; }, { capture: true });
+        renderConfigList(); renderKeypadGrid(); updateStatus(false);
+        function updateMainSoundIcon() { const btn = document.getElementById("main-sound-btn"); if (btn) { btn.innerHTML = cfgSound ? "🔊" : "🔇"; btn.style.color = cfgSound ? "#0f0" : "#888"; } }
+        function toggleSoundMain() { setSound(!cfgSound); updateMainSoundIcon(); }
+        updateMainSoundIcon();
+        const synth = window.speechSynthesis;
+        function speakVoice(text) { if (synth.speaking) synth.cancel(); const utter = new SpeechSynthesisUtterance(text); utter.lang = "ja-JP"; utter.rate = 1.2; synth.speak(utter); }
+        
+        /* --- VOICE RECOGNITION (Added Back in V3.81) --- */
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; 
+        let recognition = null; 
+        let isListening = false;
+        let voicePausing = false;  // ★ TTS読み上げ中はonendの自動再起動を抑制
+        
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition(); 
+            recognition.lang = 'ja-JP'; 
+            recognition.continuous = true; 
+            recognition.interimResults = false;
+            
+            recognition.onresult = (event) => { 
+                const last = event.results.length - 1; 
+                const transcript = event.results[last][0].transcript.trim(); 
+                log("Voice: " + transcript); 
+                
+                if (transcript.includes("キーパッド") || transcript.includes("キーパット")) {
+                      showMain();
+                      speakVoice("キーパッドを表示");
+                      return;
+                }
+                if (transcript.includes("ダッシュメーター") || transcript.includes("メーター")) {
+                      showMeter();
+                      speakVoice("ダッシュメーターを表示");
+                      return;
+                }
+
+                // ★ ロギング音声コマンド
+                if (transcript.includes("ログ開始") || transcript.includes("記録開始") || transcript.includes("ロギング開始") || transcript.includes("ロギングスタート")) {
+                    if (typeof loggerStart === 'function') {
+                        loggerStart();
+                        speakVoice("ロギングを開始しました");
+                        log("Voice: ロギング開始");
+                    }
+                    return;
+                }
+                if (transcript.includes("ログ停止") || transcript.includes("記録停止") || transcript.includes("ロギング停止") || transcript.includes("ロギングストップ") || transcript.includes("ログストップ")) {
+                    if (typeof loggerStop === 'function') {
+                        loggerStop();
+                        speakVoice("ロギングを停止しました");
+                        log("Voice: ロギング停止");
+                    }
+                    return;
+                }
+                if (transcript.includes("ログ保存") || transcript.includes("CSV保存") || transcript.includes("データ保存")) {
+                    if (typeof loggerSave === 'function') {
+                        loggerSave();
+                        speakVoice("CSVを保存します");
+                        log("Voice: CSV保存");
+                    }
+                    return;
+                }
+
+                btnLabels.forEach((label, index) => { 
+                    const cleanLabel = label.replace(/\s+/g, ''); 
+                    const cleanVoice = transcript.replace(/\s+/g, ''); 
+                    if (cleanVoice.includes(cleanLabel) && cleanLabel.length > 0) { 
+                        handleVoiceCommand(index, transcript); 
+                    } 
+                }); 
+            };
+            
+            recognition.onend = () => { 
+                if (isListening && !voicePausing) recognition.start(); // ★ TTS中は再起動しない
+                updateMicIcon(); 
+            };
+            
+            recognition.onerror = (e) => { 
+                console.log("Voice Err:", e.error); 
+                if (['not-allowed', 'network', 'service-not-allowed', 'audio-capture'].includes(e.error)) { 
+                    isListening = false; 
+                    speakVoice("音声認識エラー"); 
+                    updateMicIcon(); 
+                } 
+            };
+        }
+        
+        function handleVoiceCommand(index, transcript) { 
+            const btnNum = index + 1; 
+            const currentState = btnStates[index]; 
+            const label = btnLabels[index]; 
+            
+            // Check Lock (Ver 4.0)
+            const isLock = btnAuth[index];
+            if (isLock) { speakVoice(label + "はロックされています。手動で操作してください。"); return; }
+            
+            if (btnModes[index] === 'momentary') {
+                // ★ Pullモード: 認識は止めずにそのまま1回だけ実行
+                // speakVoiceは呼ばない (読み上げ音声をマイクが拾ってループするため)
+                executeAction(btnNum);
+                return; 
+            } 
+            
+            const isOffCommand = transcript.includes("オフ") || transcript.includes("停止") || transcript.includes("切") || transcript.toLowerCase().includes("off"); 
+            if (currentState) { 
+                if (isOffCommand) { executeAction(btnNum); voiceSpeakPaused(label + "をオフにしました"); } 
+                else { voiceSpeakPaused(label + "は、既にオンです"); } 
+            } else { 
+                if (isOffCommand) { voiceSpeakPaused(label + "は、既にオフです"); } 
+                else { executeAction(btnNum); voiceSpeakPaused(label + "をオンにしました"); } 
+            } 
+        }
+
+        // ★ TTS読み上げ中はrecognitionを停止、完了後に再開
+        // voicePausing=true にすることで onend の自動再起動を抑制してから stop する
+        function voiceSpeakPaused(text) {
+            if (recognition && isListening) {
+                voicePausing = true;   // onendの自動再起動を抑制
+                recognition.stop();
+            }
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = "ja-JP"; utter.rate = 1.2;
+            utter.onend = () => {
+                voicePausing = false;
+                if (isListening && recognition) {
+                    setTimeout(() => { try { recognition.start(); } catch(e){} }, 300);
+                }
+            };
+            if (synth.speaking) synth.cancel();
+            synth.speak(utter);
+        }
+        
+        function injectMicButton() { 
+            const headerGroup = document.querySelector('.main-header > div:last-child'); 
+            if (!headerGroup) return; 
+            
+            // Avoid duplicates
+            if (document.getElementById("mic-toggle-btn")) return;
+            
+            const micBtn = document.createElement('button'); 
+            micBtn.id = "mic-toggle-btn"; 
+            micBtn.className = "header-btn"; 
+            micBtn.innerHTML = "🎙️"; 
+            micBtn.style.fontSize = "1.2rem"; 
+            micBtn.onclick = toggleVoiceControl; 
+            
+            // Insert as first item in the right group
+            headerGroup.insertBefore(micBtn, headerGroup.firstChild); 
+        }
+        
+        function toggleVoiceControl() { 
+            if (!recognition) { alert("このブラウザは音声認識に対応していません"); return; } 
+            isListening = !isListening; 
+            if (isListening) { recognition.start(); speakVoice("音声操作、開始"); } 
+            else { recognition.stop(); speakVoice("停止します"); } 
+            updateMicIcon(); 
+        }
+        
+        function updateMicIcon() { 
+            const micBtn = document.getElementById("mic-toggle-btn"); 
+            if (!micBtn) return; 
+            if (isListening) { 
+                micBtn.innerHTML = "🔴"; 
+                micBtn.style.color = "#ff4444"; 
+                micBtn.style.animation = "pulse-mic 1.5s infinite"; 
+            } else { 
+                micBtn.innerHTML = "🎙️"; 
+                micBtn.style.color = "#aaa"; 
+                micBtn.style.animation = "none"; 
+            } 
+        }
+    </script>
+
+<!-- ============================================================ -->
+<!-- ★ LOGGER MODULE - 既存コードに一切触れず末尾に追記するだけ  -->
+<!-- ============================================================ -->
+<style>
+  /* フローティングロガーUI */
+  #logger-fab {
+    position: fixed; bottom: 80px; right: 12px; z-index: 9999;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    transition: opacity 0.1s;
+  }
+  #logger-fab.dragging { opacity: 0.85; }
+  #logger-fab.drag-ready #logger-toggle {
+    box-shadow: 0 0 0 3px #f80, 0 2px 8px rgba(0,0,0,0.5);
+    transform: scale(1.15); transition: transform 0.15s, box-shadow 0.15s;
+  }
+  #logger-panel {
+    background: rgba(20,20,20,0.95); border: 1px solid #444;
+    border-radius: 12px; padding: 10px 12px; min-width: 170px;
+    display: none; flex-direction: column; gap: 6px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    position: fixed; z-index: 9998;
+  }
+  #logger-panel.open { display: flex; }
+  #logger-status {
+    font-size: 0.7rem; color: #888; text-align: center; font-family: monospace;
+  }
+  #logger-status.recording { color: #f55; animation: log-blink 1s infinite; }
+  @keyframes log-blink { 50% { opacity: 0.4; } }
+  .log-btn {
+    border: none; border-radius: 8px; padding: 8px 10px;
+    font-size: 0.85rem; font-weight: bold; cursor: pointer; width: 100%;
+    transition: opacity 0.15s;
+  }
+  .log-btn:active { opacity: 0.7; }
+  .log-btn-rec  { background: #c0392b; color: #fff; }
+  .log-btn-stop { background: #555; color: #ccc; }
+  .log-btn-save { background: #27ae60; color: #fff; }
+  .log-btn-clr  { background: #333; color: #aaa; font-size: 0.75rem; }
+  #logger-toggle {
+    background: rgba(30,30,30,0.92); border: 1px solid #555;
+    border-radius: 50%; width: 44px; height: 44px;
+    font-size: 1.3rem; cursor: grab; display: flex;
+    align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  #logger-interval-row {
+    display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #999;
+  }
+  #logger-interval {
+    width: 48px; background: #222; border: 1px solid #555; color: #fff;
+    border-radius: 4px; padding: 3px 5px; font-size: 0.75rem; text-align: center;
+  }
+</style>
+
+<!-- フローティングボタン -->
+<div id="logger-fab">
+  <div id="logger-panel">
+    <div id="logger-status">● STANDBY  |  0 rows</div>
+    <div id="logger-interval-row">
+      <span>Interval:</span>
+      <input id="logger-interval" type="number" value="200" min="50" max="5000" step="50">
+      <span>ms</span>
+    </div>
+    <button class="log-btn log-btn-rec"  onclick="loggerStart()">⏺ REC</button>
+    <button class="log-btn log-btn-stop" onclick="loggerStop()">⏹ STOP</button>
+    <button class="log-btn log-btn-save" onclick="loggerSave()">💾 SAVE CSV</button>
+    <button class="log-btn log-btn-clr"  onclick="loggerClear()">🗑 CLEAR</button>
+  </div>
+  <button id="logger-toggle" onclick="loggerTogglePanel()" title="Logger">📋</button>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ---- 状態 ----
+  let logBuffer   = [];   // { ts, temp, s0..s6 }
+  let isRecording = false;
+  let logTimer    = null;
+  let lastSnap    = {};   // monkey-patch で常時最新値を保持
+
+  // ---- UI ----
+  let panelOpen = false;
+  window.loggerTogglePanel = function() {
+    panelOpen = !panelOpen;
+    const p = document.getElementById('logger-panel');
+    p.classList.toggle('open', panelOpen);
+    if (panelOpen) positionPanel();
+  };
+
+  function positionPanel() {
+    const fab = document.getElementById('logger-fab');
+    const p   = document.getElementById('logger-panel');
+    const btn = document.getElementById('logger-toggle');
+    if (!fab || !p || !btn) return;
+
+    // 一旦表示してサイズ取得
+    p.style.visibility = 'hidden';
+    const pr  = p.getBoundingClientRect();
+    const br  = btn.getBoundingClientRect();
+    const sw  = window.innerWidth;
+    const sh  = window.innerHeight;
+    const PAD = 8;
+
+    // 水平方向: ボタン右端を基準に右寄せ、はみ出す場合は左に
+    let left = br.right - pr.width;
+    if (left < PAD) left = br.left;
+    if (left + pr.width > sw - PAD) left = sw - pr.width - PAD;
+
+    // 垂直方向: ボタン上に開く、はみ出す場合はボタン下に
+    let top = br.top - pr.height - 6;
+    if (top < PAD) top = br.bottom + 6;
+    if (top + pr.height > sh - PAD) top = sh - pr.height - PAD;
+
+    p.style.left = left + 'px';
+    p.style.top  = top  + 'px';
+    p.style.visibility = '';
+  }
+
+  function updateStatus() {
+    const el = document.getElementById('logger-status');
+    if (!el) return;
+    if (isRecording) {
+      el.textContent = '⏺ REC  |  ' + logBuffer.length + ' rows';
+      el.className = 'recording';
+    } else {
+      el.textContent = '● STANDBY  |  ' + logBuffer.length + ' rows';
+      el.className = '';
+    }
+  }
+
+  // ---- 既存 updateMeterValue を monkey-patch (完全非破壊) ----
+  // DOMContentLoaded後に既存関数が定義されてから上書き
+  window.addEventListener('load', function() {
+    const _orig = window.updateMeterValue;
+    if (!_orig) return;
+    window.updateMeterValue = function(elId, unitId, rawVal, cfgSlotIdx) {
+      const res = _orig(elId, unitId, rawVal, cfgSlotIdx);
+      // slot index を elId から取得: meter-val-2 → slot0, meter-val-3 → slot1 ...
+      const m = elId.match(/meter-val-(\d+)/);
+      if (m) {
+        const mIdx = parseInt(m[1]);
+        if (mIdx >= 2 && mIdx <= 8) lastSnap['s' + (mIdx - 2)] = res ? res.disp : rawVal;
+      }
+      return res;
+    };
+  });
+
+  // TEMP値も拾う: meter-val-1 のtextContentを監視
+  const tempEl = document.getElementById('meter-val-1');
+  if (tempEl) {
+    const tempObs = new MutationObserver(function(muts) {
+      muts.forEach(function(m) { lastSnap.temp = tempEl.textContent.trim(); });
+    });
+    tempObs.observe(tempEl, { childList: true, subtree: true, characterData: true });
+  }
+
+  // ---- ロギングタイマー ----
+  function takeSnapshot() {
+    const now = new Date();
+    const ts = now.toISOString().replace('T', ' ').slice(0, 23); // "2026-02-27 12:34:56.789"
+    logBuffer.push({
+      ts,
+      temp: lastSnap.temp || '',
+      s0: lastSnap.s0 || '', s1: lastSnap.s1 || '', s2: lastSnap.s2 || '',
+      s3: lastSnap.s3 || '', s4: lastSnap.s4 || '', s5: lastSnap.s5 || '',
+      s6: lastSnap.s6 || ''
+    });
+    updateStatus();
+  }
+
+  window.loggerStart = function() {
+    if (isRecording) return;
+    isRecording = true;
+    const interval = parseInt(document.getElementById('logger-interval').value) || 200;
+    logTimer = setInterval(takeSnapshot, interval);
+    updateStatus();
+  };
+
+  window.loggerStop = function() {
+    if (!isRecording) return;
+    isRecording = false;
+    clearInterval(logTimer); logTimer = null;
+    updateStatus();
+  };
+
+  window.loggerClear = function() {
+    loggerStop();
+    logBuffer = [];
+    updateStatus();
+  };
+
+  // ---- CSV保存 ----
+  window.loggerSave = function() {
+    if (logBuffer.length === 0) { alert('No data to save.'); return; }
+
+    // ヘッダー: スロットラベルをrxConfigsから取得
+    const slotLabels = [];
+    for (let i = 0; i < 7; i++) {
+      try {
+        const cfg = window.rxConfigs && window.rxConfigs[i];
+        slotLabels.push(cfg ? (cfg.label || ('Slot' + (i+1))) : ('Slot' + (i+1)));
+      } catch(e) { slotLabels.push('Slot' + (i+1)); }
+    }
+
+    const header = ['Timestamp', 'ExhaustTemp', ...slotLabels].join(',');
+    const rows = logBuffer.map(function(r) {
+      return [r.ts, r.temp, r.s0, r.s1, r.s2, r.s3, r.s4, r.s5, r.s6].join(',');
+    });
+    const csv = header + '\n' + rows.join('\n');
+
+    const fname = 'canlog_' + new Date().toISOString().slice(0,19).replace(/[T:]/g, '-') + '.csv';
+
+    // File System Access API (Android Chrome対応) → fallback にダウンロード
+    if (window.showSaveFilePicker) {
+      window.showSaveFilePicker({
+        suggestedName: fname,
+        types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+      }).then(function(fh) {
+        return fh.createWritable();
+      }).then(function(w) {
+        return w.write(csv).then(function() { return w.close(); });
+      }).then(function() {
+        alert('Saved: ' + fname);
+      }).catch(function(e) {
+        if (e.name !== 'AbortError') csvFallbackDownload(csv, fname);
+      });
+    } else {
+      csvFallbackDownload(csv, fname);
+    }
+  };
+
+  function csvFallbackDownload(csv, fname) {
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = fname; a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 3000);
+  }
+
+  // ---- ドラッグ移動 (長押し500msで有効化) ----
+  (function() {
+    const fab   = document.getElementById('logger-fab');
+    const btn   = document.getElementById('logger-toggle');
+    let longTimer = null;
+    let isDragging = false;
+    let dragReady  = false;
+    let startX, startY, fabX, fabY;
+
+    // fab の現在位置を left/top で管理
+    function initPos() {
+      const r = fab.getBoundingClientRect();
+      fab.style.left   = r.left + 'px';
+      fab.style.top    = r.top  + 'px';
+      fab.style.right  = 'auto';
+      fab.style.bottom = 'auto';
+    }
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function onPointerDown(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY;
+      isDragging = false; dragReady = false;
+      longTimer = setTimeout(function() {
+        dragReady = true;
+        initPos();
+        fab.classList.add('drag-ready');
+        const r = fab.getBoundingClientRect();
+        fabX = r.left; fabY = r.top;
+        btn.setPointerCapture && btn.setPointerCapture(e.pointerId);
+      }, 500);
+    }
+
+    function onPointerMove(e) {
+      if (!dragReady) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!isDragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        isDragging = true;
+        fab.classList.add('dragging');
+        fab.classList.remove('drag-ready');
+      }
+      if (!isDragging) return;
+      const r = fab.getBoundingClientRect();
+      const maxX = window.innerWidth  - r.width;
+      const maxY = window.innerHeight - r.height;
+      fab.style.left = clamp(fabX + dx, 0, maxX) + 'px';
+      fab.style.top  = clamp(fabY + dy, 0, maxY) + 'px';
+      e.preventDefault();
+    }
+
+    function onPointerUp(e) {
+      clearTimeout(longTimer);
+      fab.classList.remove('dragging', 'drag-ready');
+      if (!isDragging && !dragReady) {
+        // 通常タップ → パネル開閉
+        loggerTogglePanel();
+      }
+      // 位置を localStorage に保存
+      if (isDragging) {
+        localStorage.setItem('loggerFabPos',
+          JSON.stringify({ left: fab.style.left, top: fab.style.top }));
+      }
+      isDragging = false; dragReady = false;
+    }
+
+    btn.addEventListener('pointerdown', onPointerDown);
+    btn.addEventListener('pointermove', onPointerMove);
+    btn.addEventListener('pointerup',   onPointerUp);
+    btn.addEventListener('pointercancel', onPointerUp);
+    // onclick を無効化 (上で直接処理するため)
+    btn.onclick = null;
+
+    // 保存済み位置を復元
+    try {
+      const saved = JSON.parse(localStorage.getItem('loggerFabPos'));
+      if (saved && saved.left && saved.top) {
+        fab.style.left   = saved.left;
+        fab.style.top    = saved.top;
+        fab.style.right  = 'auto';
+        fab.style.bottom = 'auto';
+      }
+    } catch(e) {}
+
+    // ★ 画面回転・リサイズ時に位置を再クランプ
+    function clampFabToViewport() {
+      const r   = fab.getBoundingClientRect();
+      const PAD = 4;
+      let left = parseFloat(fab.style.left) || r.left;
+      let top  = parseFloat(fab.style.top)  || r.top;
+      left = clamp(left, PAD, window.innerWidth  - r.width  - PAD);
+      top  = clamp(top,  PAD, window.innerHeight - r.height - PAD);
+      fab.style.left = left + 'px';
+      fab.style.top  = top  + 'px';
+      fab.style.right  = 'auto';
+      fab.style.bottom = 'auto';
+      localStorage.setItem('loggerFabPos',
+        JSON.stringify({ left: fab.style.left, top: fab.style.top }));
+    }
+    window.addEventListener('resize',            clampFabToViewport);
+    window.addEventListener('orientationchange', function() {
+      // orientationchange は resize より先に発火するためワンテンポ待つ
+      setTimeout(clampFabToViewport, 300);
+    });
+  })();
+
+})();
+</script>
+
+</body>
+</html>
