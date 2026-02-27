@@ -448,9 +448,9 @@
                 <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px; text-align: center;">Config Backup</div>
                 <div style="display:flex; gap:10px;">
                     <button class="action-btn btn-blue" onclick="exportConfig()" style="font-size:0.9rem;">⬇ Save Config</button>
-                    <button class="action-btn btn-orange" onclick="importConfig()" style="font-size:0.9rem;">⬆ Load Config</button>
+                    <label for="import-file" class="action-btn btn-orange" style="font-size:0.9rem; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px; padding:15px; border-radius:8px;">⬆ Load Config</label>
                 </div>
-                <input type="file" id="import-file" accept=".json" onchange="handleFileSelect(this)" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
+                <input type="file" id="import-file" accept=".json" onchange="handleFileSelect(this)" style="display:none;">
             </div>
             <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 4.0 (Group ID)<br>M5Atom S3 CAN</div>
         </div>
@@ -1106,22 +1106,7 @@
             const config = { version: "4.0.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs, grp1Id: grp1IdVal, grp2Id: grp2IdVal };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
         }
-        function importConfig() {
-            // showOpenFilePicker が使える場合 (Chrome 86+) はそちらを優先
-            if (window.showOpenFilePicker) {
-                window.showOpenFilePicker({
-                    types: [{ description: 'Config JSON', accept: { 'application/json': ['.json'] } }],
-                    multiple: false
-                }).then(async ([fh]) => {
-                    const file = await fh.getFile();
-                    const text = await file.text();
-                    handleFileText(text);
-                }).catch(e => { if (e.name !== 'AbortError') { log('Load Err: ' + e); alert('ファイルを開けませんでした'); } });
-            } else {
-                // fallback: 通常のfile input
-                document.getElementById('import-file').click();
-            }
-        }
+        function importConfig() { document.getElementById('import-file').click(); }
         function handleFileSelect(input) {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
