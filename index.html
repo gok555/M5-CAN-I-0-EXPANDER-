@@ -586,6 +586,32 @@ let currentView = "gauge";
 // BLE
 // ════════════════════════════════════════════
 async function startConnect() {
+  // ① Web Bluetooth 対応チェック
+  if (!navigator.bluetooth) {
+    alert(
+      "⚠️ Web Bluetooth が使えません\n\n" +
+      "必要な環境:\n" +
+      "・Chrome (PC / Android)  ← 推奨\n" +
+      "・Safari iOS 16+\n\n" +
+      "NG な環境:\n" +
+      "・Firefox (非対応)\n" +
+      "・file:// 直接開き (HTTPSが必要)\n\n" +
+      "→ ChromeでHTTPS URLから開いてください"
+    );
+    return;
+  }
+  // ② HTTPS / localhost チェック
+  if (location.protocol === "file:") {
+    alert(
+      "⚠️ file:// では Web Bluetooth は動作しません\n\n" +
+      "解決方法:\n" +
+      "① HTTPS サーバー経由でアクセス\n" +
+      "② ATOMS3R の Wi-Fi AP + Webサーバー\n" +
+      "③ ngrok 等でHTTPS化"
+    );
+    return;
+  }
+  log("🔍 デバイス検索中... (M5S3R_AnaCAN)");
   try {
     log("スキャン中...");
     bleDevice = await navigator.bluetooth.requestDevice({
@@ -603,7 +629,19 @@ async function startConnect() {
     document.getElementById("connect-overlay").style.display = "none";
     log("接続: " + bleDevice.name);
     await send("REQUEST_STATE");
-  } catch(e) { log("接続エラー: " + e.message); }
+  } catch(e) {
+    const msg = e.message || String(e);
+    if (msg.includes("User cancelled") || msg.includes("cancelled")) {
+      log("ℹ️ キャンセルされました");
+    } else if (msg.includes("not found") || msg.includes("no devices")) {
+      log("❌ デバイスが見つかりません");
+      log("   → ATOMS3RのLEDが点滅しているか確認");
+      log("   → main.py が起動しているか確認");
+      log("   → スマホのBluetooth ON を確認");
+    } else {
+      log("❌ 接続エラー: " + msg);
+    }
+  }
 }
 
 function onDisconnected() {
