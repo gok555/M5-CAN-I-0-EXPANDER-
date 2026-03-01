@@ -319,6 +319,12 @@ html, body {
 }
 .cf-prev-val { font-size: 1.7rem; color: var(--ok); font-family: var(--mono); }
 .cf-prev-lbl { font-size: 0.7rem; color: var(--txt2); margin-top: 2px; }
+.endian-btn {
+  flex:1; padding:8px 4px; border-radius:8px; border:2px solid var(--acc);
+  background:transparent; color:var(--txt); font-size:0.78rem; cursor:pointer;
+  transition:all .2s;
+}
+.endian-btn.active { background:var(--acc); color:#000; font-weight:700; }
 .save-btn-full {
   width: 100%; margin-top: 8px; padding: 12px; background: var(--ok);
   border: none; border-radius: 6px; color: #000;
@@ -423,6 +429,28 @@ html, body {
           <button class="s-set-btn" onclick="setSwTxId()">SET</button>
         </div>
         <div class="id-note">AUX Keypadの状態を1フレームで送信 (8バイト)</div>
+      </div>
+
+      <!-- ADC ENDIAN -->
+      <div class="s-sec">
+        <div class="s-sec-title">ADC CAN エンディアン</div>
+        <div class="id-row" style="gap:8px;">
+          <button class="endian-btn" id="endian-le" onclick="setEndian(0)">リトルエンディアン (LE)</button>
+          <button class="endian-btn" id="endian-be" onclick="setEndian(1)">ビッグエンディアン (BE)</button>
+        </div>
+        <div class="id-note">LE: [val&0xFF, val>>8]　BE: [val>>8, val&0xFF]</div>
+      </div>
+
+      <!-- CAN RX (EMTRON) -->
+      <div class="s-sec">
+        <div class="s-sec-title">CAN 受信設定 (EMTRON → AUX)</div>
+        <div class="id-row">
+          <label>RX ID: 0x</label>
+          <input type="text" id="rx-canid" maxlength="3" placeholder="600">
+          <button class="s-set-btn" onclick="setRxCanId()">SET</button>
+        </div>
+        <div class="id-note">EMTRONからのCAN IDを設定。AUXピンのみ有効。CAN受信が優先されます。</div>
+        <div class="kp-cfg-list" id="rx-cfg-list" style="margin-top:8px;"></div>
       </div>
 
       <!-- PIN MODES -->
@@ -531,6 +559,10 @@ let swOnVals = Array(NUM_CH).fill(1);
 let swOffVals= Array(NUM_CH).fill(0);
 let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
 let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
+let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
+let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
+let rxOnVals = Array(NUM_CH).fill(1);
+let rxOffVals= Array(NUM_CH).fill(0);
 
 // Button metadata (label/mode per pin, stored locally)
 function loadBtnMeta() {
@@ -738,6 +770,9 @@ function showView(v) {
     document.getElementById("tab-"+(n==="settings"?"cfg":n)).classList.toggle("active", n===v);
   });
   if (v === "settings") {
+    updateEndianUI();
+    document.getElementById("rx-canid").value = rxCanId;
+    renderRxCfgList();
     renderPinGrid();
     renderKeypadCfgList();
     renderCoeffChBar();
@@ -748,6 +783,57 @@ function showView(v) {
 // ════════════════════════════════════════════
 // SETTINGS ACTIONS
 // ════════════════════════════════════════════
+function setEndian(v) {
+  canEndian = v;
+  localStorage.setItem("ana_canEndian", v);
+  updateEndianUI();
+  send("SET_ENDIAN="+v); log("→ SET_ENDIAN="+(v===0?"LE":"BE"));
+}
+function updateEndianUI() {
+  document.getElementById("endian-le").classList.toggle("active", canEndian===0);
+  document.getElementById("endian-be").classList.toggle("active", canEndian===1);
+}
+function setRxCanId() {
+  const v = document.getElementById("rx-canid").value.trim().replace(/^0x/i,'').toUpperCase();
+  if (!v) return;
+  rxCanId = v; localStorage.setItem("ana_rxCanId", v);
+  send("SET_RX_ID=0x"+v); log("→ SET_RX_ID=0x"+v);
+}
+function renderRxCfgList() {
+  const list = document.getElementById("rx-cfg-list"); if (!list) return;
+  list.innerHTML = "";
+  const auxPins = [];
+  for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
+  if (!auxPins.length) {
+    list.innerHTML = '<div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>'; return;
+  }
+  auxPins.forEach(pin => {
+    const row = document.createElement("div");
+    row.className = "kp-cfg-row";
+    row.innerHTML = `
+      <div class="kp-cfg-pin">P${pin}</div>
+      <div class="kp-cfg-fields">
+        <div class="kp-cfg-field">
+          <label>RX ON値</label>
+          <input type="number" id="rx-on-${pin}" value="${rxOnVals[pin]}" min="0" max="255" style="width:60px;">
+        </div>
+        <div class="kp-cfg-field">
+          <label>RX OFF値</label>
+          <input type="number" id="rx-off-${pin}" value="${rxOffVals[pin]}" min="0" max="255" style="width:60px;">
+        </div>
+        <button class="s-set-btn" onclick="setRxVal(${pin})">SET</button>
+      </div>`;
+    list.appendChild(row);
+  });
+}
+function setRxVal(pin) {
+  const on  = parseInt(document.getElementById("rx-on-"+pin).value)||1;
+  const off = parseInt(document.getElementById("rx-off-"+pin).value)||0;
+  rxOnVals[pin] = on; rxOffVals[pin] = off;
+  send("RX_ON="+pin+","+on);   log("→ RX_ON="+pin+","+on);
+  send("RX_OFF="+pin+","+off); log("→ RX_OFF="+pin+","+off);
+}
+
 function setAdcTxId() {
   const v = document.getElementById("adc-txid").value.trim().replace(/^0x/i,'').toUpperCase();
   if (!v) return;
