@@ -613,16 +613,16 @@ let adcRaw   = Array(NUM_CH).fill(0);
 let swVals   = Array(NUM_CH).fill(0);    // current CAN byte value per pin
 let swSrc    = Array(NUM_CH).fill('');   // 'ble' or 'can' - 最終変化元
 let rxIndTimer = null;
-let pinModes = Array(NUM_CH).fill(1);    // 0=AUX, 1=INPUT
-let swOnVals = Array(NUM_CH).fill(1);
-let swOffVals= Array(NUM_CH).fill(0);
+let pinModes = JSON.parse(localStorage.getItem("ana_pinModes")  || "null") || Array(NUM_CH).fill(1);
+let swOnVals = JSON.parse(localStorage.getItem("ana_swOnVals")  || "null") || Array(NUM_CH).fill(1);
+let swOffVals= JSON.parse(localStorage.getItem("ana_swOffVals") || "null") || Array(NUM_CH).fill(0);
 let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
 let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
 let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
 let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
 let canBaud  = parseInt(localStorage.getItem("ana_canBaud")||"1000000");
-let rxOnVals = Array(NUM_CH).fill(1);
-let rxOffVals= Array(NUM_CH).fill(0);
+let rxOnVals = JSON.parse(localStorage.getItem("ana_rxOnVals")  || "null") || Array(NUM_CH).fill(1);
+let rxOffVals= JSON.parse(localStorage.getItem("ana_rxOffVals") || "null") || Array(NUM_CH).fill(0);
 
 // Button metadata (label/mode per pin, stored locally)
 function loadBtnMeta() {
@@ -782,14 +782,17 @@ function parseMsg(msg) {
   }
   if (msg.startsWith("PIN_MODES=")) {
     msg.slice(10).split(',').forEach((v,i) => { if (i<NUM_CH) pinModes[i] = parseInt(v)||0; });
+    localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
     applyPinModesUI(); return;
   }
   if (msg.startsWith("SW_ON=")) {
     msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) swOnVals[i] = parseInt(v)||0; });
+    localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
     return;
   }
   if (msg.startsWith("SW_OFF=")) {
     msg.slice(7).split(',').forEach((v,i) => { if (i<NUM_CH) swOffVals[i] = parseInt(v)||0; });
+    localStorage.setItem("ana_swOffVals", JSON.stringify(swOffVals));
     renderKeypadCfgList(); return;
   }
   if (msg.startsWith("TXID=")) {
@@ -833,10 +836,12 @@ function parseMsg(msg) {
   }
   if (msg.startsWith("RX_ON=")) {
     msg.slice(6).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOnVals[i]=parseInt(v); });
+    localStorage.setItem("ana_rxOnVals", JSON.stringify(rxOnVals));
     renderRxCfgList(); return;
   }
   if (msg.startsWith("RX_OFF=")) {
     msg.slice(7).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOffVals[i]=parseInt(v); });
+    localStorage.setItem("ana_rxOffVals", JSON.stringify(rxOffVals));
     renderRxCfgList(); return;
   }
   if (msg === "SW_LOCK=CAN") {
