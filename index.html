@@ -325,6 +325,30 @@ html, body {
   color:var(--txt); font-size:0.85rem; cursor:pointer; transition:all .2s;
 }
 .baud-btn.active { background:var(--acc); color:#000; font-weight:700; }
+/* CAN RX インジケーター */
+.rx-ind {
+  display:inline-block; padding:2px 8px; border-radius:12px;
+  font-size:0.72rem; font-weight:700; letter-spacing:.04em;
+  border:1.5px solid #888; color:#888; transition:all .3s;
+  white-space:nowrap;
+}
+.rx-ind.active {
+  border-color:#ff9800; color:#ff9800;
+  box-shadow:0 0 8px rgba(255,152,0,0.5);
+  animation: rxpulse .6s ease-out;
+}
+@keyframes rxpulse {
+  0%   { box-shadow:0 0 0px rgba(255,152,0,0); }
+  40%  { box-shadow:0 0 14px rgba(255,152,0,0.8); }
+  100% { box-shadow:0 0 4px rgba(255,152,0,0.3); }
+}
+/* キーパッドボタン: CAN受信で変化した場合 */
+.kp-btn.rx-changed {
+  outline: 2px solid #ff9800;
+  outline-offset: 2px;
+}
+.kp-btn.rx-changed .kb-src { color:#ff9800; font-size:0.62rem; }
+.kb-src { font-size:0.62rem; color:var(--txt2); margin-top:2px; }
 .endian-btn {
   flex:1; padding:8px 4px; border-radius:8px; border:2px solid var(--acc);
   background:transparent; color:var(--txt); font-size:0.78rem; cursor:pointer;
@@ -366,6 +390,7 @@ html, body {
     <div class="t-spacer"></div>
     <div id="ble-badge"  class="t-badge">BLE --</div>
     <div id="can-badge"  class="t-badge">CAN --</div>
+    <div id="rx-ind" class="rx-ind">RX --</div>
     <div class="t-tabs">
       <button class="t-tab active" id="tab-gauge"  onclick="showView('gauge')">📊</button>
       <button class="t-tab"        id="tab-keypad" onclick="showView('keypad')">🎛</button>
@@ -572,6 +597,8 @@ let isConnected = false;
 // Device state (synced from NVS on connect)
 let adcRaw   = Array(NUM_CH).fill(0);
 let swVals   = Array(NUM_CH).fill(0);    // current CAN byte value per pin
+let swSrc    = Array(NUM_CH).fill('');   // 'ble' or 'can' - 最終変化元
+let rxIndTimer = null;
 let pinModes = Array(NUM_CH).fill(1);    // 0=AUX, 1=INPUT
 let swOnVals = Array(NUM_CH).fill(1);
 let swOffVals= Array(NUM_CH).fill(0);
@@ -799,6 +826,13 @@ function parseMsg(msg) {
     renderRxCfgList(); return;
   }
   if (msg === "SW_LOCK=CAN") { log("⚠ CAN優先中: BLE操作ロック"); return; }
+  if (msg.startsWith("RX_ACT=")) {
+    // CAN RXによるAUX変化通知
+    const vals = msg.slice(7).split(',').map(v=>parseInt(v)||0);
+    vals.forEach((v,i) => { if(i<NUM_CH) swSrc[i] = 'can'; });
+    showRxIndicator(vals);
+    return;
+  }
   log("← " + msg);
 }
 
@@ -828,6 +862,24 @@ function showView(v) {
 // ════════════════════════════════════════════
 // SETTINGS ACTIONS
 // ════════════════════════════════════════════
+function showRxIndicator(vals) {
+  const el = document.getElementById('rx-ind');
+  // どのピンがON/OFFか表示
+  const onPins  = vals.map((v,i)=>pinModes[i]===0 && v===swOnVals[i]  ? `P${i}:ON`  : null).filter(Boolean);
+  const offPins = vals.map((v,i)=>pinModes[i]===0 && v===swOffVals[i] ? `P${i}:OFF` : null).filter(Boolean);
+  const parts = [...onPins, ...offPins];
+  el.textContent = parts.length ? 'RX ' + parts.join(' ') : 'RX ACT';
+  el.classList.remove('active');
+  void el.offsetWidth; // reflow for animation restart
+  el.classList.add('active');
+  if (rxIndTimer) clearTimeout(rxIndTimer);
+  rxIndTimer = setTimeout(() => {
+    el.classList.remove('active');
+    el.textContent = 'RX --';
+  }, 3000);
+  log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
+}
+
 function setBaud(v) {
   canBaud = v;
   localStorage.setItem("ana_canBaud", v);
@@ -1025,9 +1077,12 @@ function renderKeypad() {
     const btn   = document.createElement("div");
     btn.className = "kp-btn" + (isOn ? " on" : "") + (meta.mode==="momentary" ? " momentary" : "");
     btn.id = `kp-${pin}`;
+    const srcLabel = swSrc[pin] === 'can' ? '📡CAN RX' : swSrc[pin] === 'ble' ? '📱BLE' : '';
     btn.innerHTML = `
       <div class="kb-label">${meta.label}</div>
-      <div class="kb-val">P${pin} · ${meta.mode==="momentary"?"PULSE":"TOGGLE"} · val:${swVals[pin]}</div>`;
+      <div class="kb-val">P${pin} · ${meta.mode==="momentary"?"PULSE":"TOGGLE"} · val:${swVals[pin]}</div>
+      <div class="kb-src">${srcLabel}</div>`;
+    if (swSrc[pin] === 'can') btn.classList.add('rx-changed');
     btn.addEventListener("pointerdown", e => { e.preventDefault(); handleBtnDown(pin); });
     btn.addEventListener("pointerup",   e => { e.preventDefault(); handleBtnUp(pin); });
     btn.addEventListener("contextmenu", e => e.preventDefault());
@@ -1056,6 +1111,7 @@ function handleBtnUp(pin) {
 }
 
 function executeToggle(pin) {
+  swSrc[pin] = 'ble';
   const isOn = swVals[pin] === swOnVals[pin];
   const newVal = isOn ? swOffVals[pin] : swOnVals[pin];
   swVals[pin] = newVal;
