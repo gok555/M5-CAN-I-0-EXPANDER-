@@ -319,6 +319,12 @@ html, body {
 }
 .cf-prev-val { font-size: 1.7rem; color: var(--ok); font-family: var(--mono); }
 .cf-prev-lbl { font-size: 0.7rem; color: var(--txt2); margin-top: 2px; }
+.baud-btn {
+  flex:1; min-width:56px; padding:8px 4px; border-radius:8px;
+  border:2px solid var(--acc); background:transparent;
+  color:var(--txt); font-size:0.85rem; cursor:pointer; transition:all .2s;
+}
+.baud-btn.active { background:var(--acc); color:#000; font-weight:700; }
 .endian-btn {
   flex:1; padding:8px 4px; border-radius:8px; border:2px solid var(--acc);
   background:transparent; color:var(--txt); font-size:0.78rem; cursor:pointer;
@@ -429,6 +435,18 @@ html, body {
           <button class="s-set-btn" onclick="setSwTxId()">SET</button>
         </div>
         <div class="id-note">AUX Keypadの状態を1フレームで送信 (8バイト)</div>
+      </div>
+
+      <!-- CAN BAUDRATE -->
+      <div class="s-sec">
+        <div class="s-sec-title">CAN ボーレート</div>
+        <div class="id-row" style="gap:6px;flex-wrap:wrap;">
+          <button class="baud-btn" id="baud-125" onclick="setBaud(125000)">125k</button>
+          <button class="baud-btn" id="baud-250" onclick="setBaud(250000)">250k</button>
+          <button class="baud-btn" id="baud-500" onclick="setBaud(500000)">500k</button>
+          <button class="baud-btn active" id="baud-1000" onclick="setBaud(1000000)">1M</button>
+        </div>
+        <div class="id-note">変更後CAN自動再起動。デフォルト: 1Mbps</div>
       </div>
 
       <!-- ADC ENDIAN -->
@@ -561,6 +579,7 @@ let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
 let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
 let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
 let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
+let canBaud  = parseInt(localStorage.getItem("ana_canBaud")||"1000000");
 let rxOnVals = Array(NUM_CH).fill(1);
 let rxOffVals= Array(NUM_CH).fill(0);
 
@@ -755,6 +774,31 @@ function parseMsg(msg) {
     swOffVals[pin] = parseInt(p[2])||0;
     renderKeypad(); return;
   }
+  if (msg.startsWith("BAUD=")) {
+    canBaud = parseInt(msg.slice(5));
+    localStorage.setItem("ana_canBaud", canBaud);
+    updateBaudUI(); return;
+  }
+  if (msg.startsWith("RX_ID=")) {
+    rxCanId = msg.slice(6).replace(/0x/i,'').toUpperCase();
+    localStorage.setItem("ana_rxCanId", rxCanId);
+    const el = document.getElementById("rx-canid");
+    if (el) el.value = rxCanId; return;
+  }
+  if (msg.startsWith("ENDIAN=")) {
+    canEndian = parseInt(msg.slice(7));
+    localStorage.setItem("ana_canEndian", canEndian);
+    updateEndianUI(); return;
+  }
+  if (msg.startsWith("RX_ON=")) {
+    msg.slice(6).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOnVals[i]=parseInt(v); });
+    renderRxCfgList(); return;
+  }
+  if (msg.startsWith("RX_OFF=")) {
+    msg.slice(7).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOffVals[i]=parseInt(v); });
+    renderRxCfgList(); return;
+  }
+  if (msg === "SW_LOCK=CAN") { log("⚠ CAN優先中: BLE操作ロック"); return; }
   log("← " + msg);
 }
 
@@ -770,6 +814,7 @@ function showView(v) {
     document.getElementById("tab-"+(n==="settings"?"cfg":n)).classList.toggle("active", n===v);
   });
   if (v === "settings") {
+    updateBaudUI();
     updateEndianUI();
     document.getElementById("rx-canid").value = rxCanId;
     renderRxCfgList();
@@ -783,6 +828,18 @@ function showView(v) {
 // ════════════════════════════════════════════
 // SETTINGS ACTIONS
 // ════════════════════════════════════════════
+function setBaud(v) {
+  canBaud = v;
+  localStorage.setItem("ana_canBaud", v);
+  updateBaudUI();
+  send("SET_BAUD="+v); log("→ SET_BAUD="+v);
+}
+function updateBaudUI() {
+  [125000,250000,500000,1000000].forEach(b => {
+    const el = document.getElementById("baud-"+(b>=1000000?"1000":b/1000));
+    if (el) el.classList.toggle("active", canBaud===b);
+  });
+}
 function setEndian(v) {
   canEndian = v;
   localStorage.setItem("ana_canEndian", v);
