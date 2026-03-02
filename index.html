@@ -325,22 +325,31 @@ html, body {
   color:var(--txt); font-size:0.85rem; cursor:pointer; transition:all .2s;
 }
 .baud-btn.active { background:var(--acc); color:#000; font-weight:700; }
-/* CAN RX インジケーター */
-.rx-ind {
-  display:inline-block; padding:2px 8px; border-radius:12px;
-  font-size:0.72rem; font-weight:700; letter-spacing:.04em;
-  border:1.5px solid #888; color:#888; transition:all .3s;
-  white-space:nowrap;
+/* CAN RX ステータスバー (キーパッド画面上部) */
+.rx-statusbar {
+  display:flex; align-items:center; gap:8px;
+  padding:4px 8px; margin-bottom:4px;
+  background:rgba(255,152,0,0.06);
+  border:1px solid rgba(255,152,0,0.2);
+  border-radius:6px; font-size:0.72rem;
 }
-.rx-ind.active {
-  border-color:#ff9800; color:#ff9800;
-  box-shadow:0 0 8px rgba(255,152,0,0.5);
+.rx-sb-label {
+  font-weight:700; color:#ff9800; letter-spacing:.08em; flex-shrink:0;
+}
+.rx-sb-ind {
+  color:#555; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.rx-sb-ind.active {
+  color:#ff9800; font-weight:600;
   animation: rxpulse .6s ease-out;
 }
+.rx-sb-lock {
+  font-size:0.68rem; color:#ff5722; font-weight:700; flex-shrink:0;
+}
 @keyframes rxpulse {
-  0%   { box-shadow:0 0 0px rgba(255,152,0,0); }
-  40%  { box-shadow:0 0 14px rgba(255,152,0,0.8); }
-  100% { box-shadow:0 0 4px rgba(255,152,0,0.3); }
+  0%   { opacity:0.4; }
+  40%  { opacity:1; }
+  100% { opacity:0.9; }
 }
 /* キーパッドボタン: CAN受信で変化した場合 */
 .kp-btn.rx-changed {
@@ -390,7 +399,6 @@ html, body {
     <div class="t-spacer"></div>
     <div id="ble-badge"  class="t-badge">BLE --</div>
     <div id="can-badge"  class="t-badge">CAN --</div>
-    <div id="rx-ind" class="rx-ind">RX --</div>
     <div class="t-tabs">
       <button class="t-tab active" id="tab-gauge"  onclick="showView('gauge')">📊</button>
       <button class="t-tab"        id="tab-keypad" onclick="showView('keypad')">🎛</button>
@@ -424,6 +432,12 @@ html, body {
 
     <!-- ── KEYPAD VIEW ───────────────── -->
     <div id="view-keypad" class="view">
+      <!-- CAN RX ステータスバー -->
+      <div id="rx-statusbar" class="rx-statusbar">
+        <span class="rx-sb-label">CAN RX</span>
+        <span id="rx-sb-ind" class="rx-sb-ind">待機中</span>
+        <span id="rx-sb-lock" class="rx-sb-lock" style="display:none;">🔒CAN優先</span>
+      </div>
       <div id="keypad-empty">
         <div class="ke-icon">🎛</div>
         <div class="ke-txt">AUX ピンを設定してください</div>
@@ -825,7 +839,11 @@ function parseMsg(msg) {
     msg.slice(7).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOffVals[i]=parseInt(v); });
     renderRxCfgList(); return;
   }
-  if (msg === "SW_LOCK=CAN") { log("⚠ CAN優先中: BLE操作ロック"); return; }
+  if (msg === "SW_LOCK=CAN") {
+    const lock = document.getElementById('rx-sb-lock');
+    if (lock) { lock.style.display='inline'; setTimeout(()=>lock.style.display='none',2000); }
+    log("⚠ CAN優先中: BLE操作ロック"); return;
+  }
   if (msg.startsWith("RX_ACT=")) {
     // CAN RXによるAUX変化通知
     const vals = msg.slice(7).split(',').map(v=>parseInt(v)||0);
@@ -863,19 +881,23 @@ function showView(v) {
 // SETTINGS ACTIONS
 // ════════════════════════════════════════════
 function showRxIndicator(vals) {
-  const el = document.getElementById('rx-ind');
-  // どのピンがON/OFFか表示
-  const onPins  = vals.map((v,i)=>pinModes[i]===0 && v===swOnVals[i]  ? `P${i}:ON`  : null).filter(Boolean);
-  const offPins = vals.map((v,i)=>pinModes[i]===0 && v===swOffVals[i] ? `P${i}:OFF` : null).filter(Boolean);
+  const ind  = document.getElementById('rx-sb-ind');
+  const lock = document.getElementById('rx-sb-lock');
+  if (!ind) return;
+  const onPins  = vals.map((v,i)=>pinModes[i]===0 && v===swOnVals[i]  ? 'P'+i+':ON'  : null).filter(Boolean);
+  const offPins = vals.map((v,i)=>pinModes[i]===0 && v===swOffVals[i] ? 'P'+i+':OFF' : null).filter(Boolean);
   const parts = [...onPins, ...offPins];
-  el.textContent = parts.length ? 'RX ' + parts.join(' ') : 'RX ACT';
-  el.classList.remove('active');
-  void el.offsetWidth; // reflow for animation restart
-  el.classList.add('active');
+  const txt = parts.length ? parts.join('  ') : 'ACT';
+  ind.textContent = txt;
+  ind.classList.remove('active');
+  void ind.offsetWidth;
+  ind.classList.add('active');
+  if (lock) lock.style.display = 'inline';
   if (rxIndTimer) clearTimeout(rxIndTimer);
   rxIndTimer = setTimeout(() => {
-    el.classList.remove('active');
-    el.textContent = 'RX --';
+    ind.classList.remove('active');
+    ind.textContent = '待機中';
+    if (lock) lock.style.display = 'none';
   }, 3000);
   log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
 }
