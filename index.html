@@ -997,13 +997,16 @@ function parseMsg(msg) {
 // VIEW NAVIGATION
 // ════════════════════════════════════════════
 function showView(v) {
-  // オーバーレイを隠してビューへ遷移
   document.getElementById("connect-overlay").style.display = "none";
   currentView = v;
   ["gauge","keypad","settings"].forEach(n => {
     document.getElementById("view-"+n).classList.toggle("active", n===v);
     document.getElementById("tab-"+(n==="settings"?"cfg":n)).classList.toggle("active", n===v);
   });
+  if (v === "gauge") {
+    // settingsから戻るとCanvasサイズが0になるため再計算
+    requestAnimationFrame(() => { sizeCanvases(); });
+  }
   if (v === "settings") {
     updateBaudUI();
     updateEndianUI();
