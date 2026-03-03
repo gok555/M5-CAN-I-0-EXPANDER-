@@ -891,6 +891,58 @@ function onNotify(ev) {
 }
 
 function parseMsg(msg) {
+  // CFG1パケット: 設定値一括受信
+  if (msg.startsWith("CFG1=")) {
+    msg.slice(5).split("|").forEach(part => {
+      if (part.startsWith("LOG="))      log("📡 " + part.slice(4));
+      else if (part.startsWith("TXID="))    { adcTxId = part.slice(7).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_adcTxId",adcTxId); }
+      else if (part.startsWith("SW_TXID=")) { swTxId  = part.slice(10).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_swTxId",swTxId); }
+      else if (part.startsWith("RX_ID="))   { rxCanId = part.slice(9).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_rxCanId",rxCanId); }
+      else if (part.startsWith("ENDIAN="))  { canEndian = parseInt(part.slice(7)); localStorage.setItem("ana_canEndian",canEndian); updateEndianUI(); }
+      else if (part.startsWith("AUX_MODE=")){ auxCtrlMode = parseInt(part.slice(9)); localStorage.setItem("ana_auxCtrlMode",auxCtrlMode); updateAuxModeUI(); }
+      else if (part.startsWith("BAUD="))    { canBaud = parseInt(part.slice(5)); localStorage.setItem("ana_canBaud",canBaud); updateBaudUI(); }
+    }); return;
+  }
+  // CFG2パケット: ピン設定一括受信
+  if (msg.startsWith("CFG2=")) {
+    msg.slice(5).split("|").forEach(part => {
+      if (part.startsWith("PIN_MODES=")) {
+        part.slice(10).split(',').forEach((v,i) => { if(i<NUM_CH) pinModes[i]=parseInt(v)||0; });
+        localStorage.setItem("ana_pinModes", JSON.stringify(pinModes)); applyPinModesUI();
+      } else if (part.startsWith("SW_ON=")) {
+        part.slice(6).split(',').forEach((v,i) => { if(i<NUM_CH) swOnVals[i]=parseInt(v)||0; });
+        localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
+      } else if (part.startsWith("SW_OFF=")) {
+        part.slice(7).split(',').forEach((v,i) => { if(i<NUM_CH) swOffVals[i]=parseInt(v)||0; });
+        localStorage.setItem("ana_swOffVals", JSON.stringify(swOffVals));
+      } else if (part.startsWith("RX_ON=")) {
+        part.slice(6).split(',').forEach((v,i) => { if(i<NUM_CH) rxOnVals[i]=parseInt(v)||0; });
+        localStorage.setItem("ana_rxOnVals", JSON.stringify(rxOnVals));
+      } else if (part.startsWith("RX_OFF=")) {
+        part.slice(7).split(',').forEach((v,i) => { if(i<NUM_CH) rxOffVals[i]=parseInt(v)||0; });
+        localStorage.setItem("ana_rxOffVals", JSON.stringify(rxOffVals));
+      } else if (part.startsWith("SW_VALS=")) {
+        part.slice(8).split(',').forEach((v,i) => { if(i<NUM_CH) swVals[i]=parseInt(v)||0; });
+        renderKeypad();
+      }
+    }); return;
+  }
+
+  // 複合パケット "AVALS=...|SW=...|ST=..." を分解して個別処理
+  if (msg.includes("|SW=")) {
+    msg.split("|").forEach(part => {
+      if (part.startsWith("AVALS="))
+        part.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) adcRaw[i] = parseInt(v)||0; });
+      else if (part.startsWith("SW="))
+        part.slice(3).split(',').forEach((v,i) => { if (i<NUM_CH) swVals[i] = parseInt(v)||0; });
+      else if (part.startsWith("ST=")) {
+        const ok = part.slice(3) === "1";
+        const b = document.getElementById("can-badge");
+        if (b) { b.textContent = ok ? "CAN OK" : "CAN ERR"; b.className = "t-badge " + (ok?"ok":"err"); }
+      }
+    });
+    renderAllGauges(); updateCoeffPreview(); renderKeypad(); return;
+  }
   if (msg.startsWith("AVALS=")) {
     msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) adcRaw[i] = parseInt(v)||0; });
     renderAllGauges(); updateCoeffPreview(); return;
