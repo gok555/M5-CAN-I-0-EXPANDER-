@@ -356,7 +356,9 @@ html, body {
 .cd-title { font-size:1rem; font-weight:700; color:var(--acc); margin-bottom:10px; }
 .cd-msg   { font-size:0.82rem; color:var(--txt2); margin-bottom:18px; line-height:1.5; }
 .cd-btns  { display:flex; gap:10px; justify-content:center; }
-.cd-ok  { flex:1; padding:10px; background:var(--acc); color:#000; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
+.cd-ok  { flex:1; padding:12px 10px; background:#00e5ff; color:#000; border:3px solid #00e5ff;
+           border-radius:8px; font-weight:800; font-size:1rem; cursor:pointer;
+           box-shadow:0 0 16px rgba(0,229,255,0.6); letter-spacing:.04em; }
 .cd-cancel { flex:1; padding:10px; background:transparent; color:var(--txt); border:1.5px solid #444; border-radius:8px; cursor:pointer; }
 
 .aux-mode-row { margin-bottom:10px; }
@@ -1244,11 +1246,12 @@ function togglePin(i) {
 }
 
 function applyPinModesUI() {
-  // Gauge cells: dim AUX pins
+  // Gauge cells: AUXピンをdim + INPUT/AUXで描画内容切替
   for (let i=0; i<NUM_CH; i++) {
     const c = document.getElementById(`gc-${i}`);
     if (c) c.classList.toggle("aux-mode", pinModes[i]!==1);
   }
+  renderAllGauges();   // ← ピンモード変化後に再描画（これが抜けていた）
   renderKeypad();
   renderPinGrid();
 }
