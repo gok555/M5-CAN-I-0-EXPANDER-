@@ -319,6 +319,46 @@ html, body {
 }
 .cf-prev-val { font-size: 1.7rem; color: var(--ok); font-family: var(--mono); }
 .cf-prev-lbl { font-size: 0.7rem; color: var(--txt2); margin-top: 2px; }
+/* CAN RXモード時のKeypadグレーアウト */
+#view-keypad.canrx-mode #keypad-grid { opacity:0.4; pointer-events:none; }
+#view-keypad.canrx-mode::before {
+  content:'📡 CAN RXモード';
+  display:block; text-align:center; padding:6px;
+  color:#ff9800; font-size:0.78rem; font-weight:700;
+  background:rgba(255,152,0,0.08); border-radius:6px; margin-bottom:6px;
+}
+
+/* 再起動オーバーレイ */
+#restart-overlay {
+  display:none; position:fixed; inset:0; z-index:9999;
+  background:rgba(0,0,0,0.85); flex-direction:column;
+  align-items:center; justify-content:center; gap:16px;
+}
+#restart-overlay.show { display:flex; }
+.restart-msg { color:#00e5ff; font-size:1.1rem; font-weight:700; text-align:center; }
+.restart-spinner {
+  width:40px; height:40px; border:3px solid #222;
+  border-top:3px solid #00e5ff; border-radius:50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* 確認ダイアログ */
+#confirm-dialog {
+  display:none; position:fixed; inset:0; z-index:9998;
+  background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
+}
+#confirm-dialog.show { display:flex; }
+.cd-box {
+  background:#0d1a24; border:1.5px solid var(--acc);
+  border-radius:12px; padding:24px; max-width:300px; width:90%; text-align:center;
+}
+.cd-title { font-size:1rem; font-weight:700; color:var(--acc); margin-bottom:10px; }
+.cd-msg   { font-size:0.82rem; color:var(--txt2); margin-bottom:18px; line-height:1.5; }
+.cd-btns  { display:flex; gap:10px; justify-content:center; }
+.cd-ok  { flex:1; padding:10px; background:var(--acc); color:#000; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
+.cd-cancel { flex:1; padding:10px; background:transparent; color:var(--txt); border:1.5px solid #444; border-radius:8px; cursor:pointer; }
+
 .baud-btn {
   flex:1; min-width:56px; padding:8px 4px; border-radius:8px;
   border:2px solid var(--acc); background:transparent;
@@ -391,6 +431,20 @@ html, body {
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23081828'/%3E%3Cstop offset='1' stop-color='%23030a12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='32' fill='url(%23g)'/%3E%3Ccircle cx='90' cy='90' r='72' fill='none' stroke='%2300e5ff' stroke-width='3' opacity='0.3'/%3E%3Ccircle cx='90' cy='90' r='55' fill='none' stroke='%2300e5ff' stroke-width='1.5' opacity='0.15'/%3E%3Ctext x='90' y='80' font-size='28' fill='%23ff8800' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='2'%3EI/O%3C/text%3E%3Ctext x='90' y='112' font-size='28' fill='%2300e5ff' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='3'%3ECAN%3C/text%3E%3Cline x1='50' y1='92' x2='130' y2='92' stroke='%2300e5ff' stroke-width='1.5' opacity='0.5'/%3E%3C/svg%3E">
 </head>
 <body>
+<div id="restart-overlay">
+  <div class="restart-spinner"></div>
+  <div class="restart-msg">デバイス再起動中...<br><span style="font-size:0.8rem;color:#888;">完了後、再接続してください</span></div>
+</div>
+<div id="confirm-dialog">
+  <div class="cd-box">
+    <div class="cd-title">⚠ ピンモード変更</div>
+    <div class="cd-msg" id="cd-msg">ピンモードを更新し、デバイスを再起動します。<br>よろしいですか？</div>
+    <div class="cd-btns">
+      <button class="cd-cancel" onclick="closeConfirm()">キャンセル</button>
+      <button class="cd-ok" id="cd-ok-btn" onclick="executePinModeSet()">✅ OK・再起動</button>
+    </div>
+  </div>
+</div>
 <div id="app">
 
   <!-- TOPBAR -->
@@ -514,7 +568,18 @@ html, body {
       <div class="s-sec">
         <div class="s-sec-title">PIN MODE</div>
         <div class="pin-grid" id="pin-grid"></div>
-        <div class="id-note" style="margin-top:6px;">タップで INPUT(ADC) / AUX(スイッチ) 切替</div>
+        <div class="id-note" style="margin-top:6px;">タップで INPUT(ADC) / AUX(スイッチ) 切替 → SETで確定・再起動</div>
+        <button class="save-btn-full" onclick="confirmPinModeSet()" style="margin-top:8px;">📡 ピンモードSET &amp; 再起動</button>
+      </div>
+
+      <!-- AUX CTRL MODE -->
+      <div class="s-sec">
+        <div class="s-sec-title">AUX 制御モード</div>
+        <div class="id-row" style="gap:8px;">
+          <button class="endian-btn" id="aux-keypad-btn" onclick="setAuxMode(0)">📱 Keypad (BLE)</button>
+          <button class="endian-btn" id="aux-canrx-btn"  onclick="setAuxMode(1)">📡 CAN RX</button>
+        </div>
+        <div class="id-note">Keypad: スマホから操作　CAN RX: 外部CAN信号で制御（排他）</div>
       </div>
 
       <!-- KEYPAD BUTTON CONFIG (AUX pins only) -->
@@ -621,8 +686,10 @@ let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
 let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
 let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
 let canBaud  = parseInt(localStorage.getItem("ana_canBaud")||"1000000");
-let rxOnVals = JSON.parse(localStorage.getItem("ana_rxOnVals")  || "null") || Array(NUM_CH).fill(1);
-let rxOffVals= JSON.parse(localStorage.getItem("ana_rxOffVals") || "null") || Array(NUM_CH).fill(0);
+let rxOnVals    = JSON.parse(localStorage.getItem("ana_rxOnVals")  || "null") || Array(NUM_CH).fill(1);
+let rxOffVals   = JSON.parse(localStorage.getItem("ana_rxOffVals") || "null") || Array(NUM_CH).fill(0);
+let auxCtrlMode = parseInt(localStorage.getItem("ana_auxCtrlMode") || "0"); // 0=Keypad 1=CAN RX
+let pendingPinModes = null;  // 保留中のピンモード変更
 
 // Button metadata (label/mode per pin, stored locally)
 function loadBtnMeta() {
@@ -844,10 +911,19 @@ function parseMsg(msg) {
     localStorage.setItem("ana_rxOffVals", JSON.stringify(rxOffVals));
     renderRxCfgList(); return;
   }
-  if (msg === "SW_LOCK=CAN") {
+  if (msg.startsWith("AUX_MODE=")) {
+    auxCtrlMode = parseInt(msg.slice(9));
+    localStorage.setItem("ana_auxCtrlMode", auxCtrlMode);
+    updateAuxModeUI(); return;
+  }
+  if (msg === "RESTARTING") {
+    log("🔄 デバイス再起動中...");
+    showRestartingOverlay(); return;
+  }
+  if (msg === "SW_LOCK=CAN" || msg === "SW_LOCK=CANRX") {
     const lock = document.getElementById('rx-sb-lock');
     if (lock) { lock.style.display='inline'; setTimeout(()=>lock.style.display='none',2000); }
-    log("⚠ CAN優先中: BLE操作ロック"); return;
+    log("⚠ CAN RXモード: Keypad無効"); return;
   }
   if (msg.startsWith("RX_ACT=")) {
     // CAN RXによるAUX変化通知
@@ -873,6 +949,7 @@ function showView(v) {
   if (v === "settings") {
     updateBaudUI();
     updateEndianUI();
+    updateAuxModeUI();
     document.getElementById("rx-canid").value = rxCanId;
     renderRxCfgList();
     renderPinGrid();
@@ -905,6 +982,54 @@ function showRxIndicator(vals) {
     if (lock) lock.style.display = 'none';
   }, 3000);
   log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
+}
+
+// ── ピンモード SET & 再起動 ──
+function confirmPinModeSet() {
+  const changes = [];
+  for (let i=0; i<NUM_CH; i++) {
+    changes.push('P'+i+':'+(pinModes[i]===1?'INPUT':'AUX'));
+  }
+  document.getElementById('cd-msg').innerHTML =
+    'ピンモードを更新し、デバイスを再起動します。<br>' +
+    '<span style="font-size:0.75rem;color:#aaa;">' + changes.join('  ') + '</span><br><br>よろしいですか？';
+  document.getElementById('confirm-dialog').classList.add('show');
+}
+function closeConfirm() {
+  document.getElementById('confirm-dialog').classList.remove('show');
+}
+function executePinModeSet() {
+  closeConfirm();
+  const modeStr = pinModes.join(',');
+  send('SET_ALL_PINS=' + modeStr);
+  log('→ SET_ALL_PINS=' + modeStr + ' (再起動)');
+  localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
+  setTimeout(showRestartingOverlay, 200);
+}
+function showRestartingOverlay() {
+  document.getElementById('restart-overlay').classList.add('show');
+  // 10秒後に自動で閉じる(再接続を促す)
+  setTimeout(() => {
+    document.getElementById('restart-overlay').classList.remove('show');
+  }, 10000);
+}
+
+// ── AUX制御モード ──
+function setAuxMode(v) {
+  auxCtrlMode = v;
+  localStorage.setItem('ana_auxCtrlMode', v);
+  updateAuxModeUI();
+  send('SET_AUX_MODE=' + v);
+  log('→ AUX MODE: ' + (v===0 ? 'Keypad' : 'CAN RX'));
+}
+function updateAuxModeUI() {
+  const kp = document.getElementById('aux-keypad-btn');
+  const cr = document.getElementById('aux-canrx-btn');
+  if (kp) kp.classList.toggle('active', auxCtrlMode===0);
+  if (cr) cr.classList.toggle('active', auxCtrlMode===1);
+  // Keypadビューのボタンをグレーアウト
+  const kpView = document.getElementById('view-keypad');
+  if (kpView) kpView.classList.toggle('canrx-mode', auxCtrlMode===1);
 }
 
 function setBaud(v) {
@@ -998,9 +1123,8 @@ function renderPinGrid() {
 function togglePin(i) {
   pinModes[i] = pinModes[i]===1 ? 0 : 1;
   renderPinGrid(); applyPinModesUI();
-  send(`SET_PIN_MODE=${i},${pinModes[i]}`);
-  log(`→ SET_PIN_MODE=${i},${pinModes[i]}`);
   renderKeypadCfgList();
+  // ※ SET & 再起動ボタンで確定
 }
 
 function applyPinModesUI() {
