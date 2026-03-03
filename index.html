@@ -919,14 +919,16 @@ function parseMsg(msg) {
     localStorage.setItem("ana_adcTxId", adcTxId);
     const d=document.getElementById('adc-txid-dec'); if(d) d.value=parseInt(adcTxId,16);
     const h=document.getElementById('adc-txid-hex'); if(h) h.value=adcTxId;
-    document.getElementById("adc-txid").value = adcTxId; return;
+    const _a=document.getElementById("adc-txid-dec"); if(_a) _a.value=parseInt(adcTxId,16);
+    const _b=document.getElementById("adc-txid-hex"); if(_b) _b.value=adcTxId; return;
   }
   if (msg.startsWith("SW_TXID=")) {
     swTxId = msg.slice(8).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_swTxId", swTxId);
     const d=document.getElementById('sw-txid-dec'); if(d) d.value=parseInt(swTxId,16);
     const h=document.getElementById('sw-txid-hex'); if(h) h.value=swTxId;
-    document.getElementById("sw-txid").value = swTxId; return;
+    const _c=document.getElementById("sw-txid-dec"); if(_c) _c.value=parseInt(swTxId,16);
+    const _d=document.getElementById("sw-txid-hex"); if(_d) _d.value=swTxId; return;
   }
   if (msg.startsWith("STATUS=")) {
     const ok = msg === "STATUS=CAN_OK";
@@ -949,8 +951,8 @@ function parseMsg(msg) {
   if (msg.startsWith("RX_ID=")) {
     rxCanId = msg.slice(6).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_rxCanId", rxCanId);
-    const el = document.getElementById("rx-canid");
-    if (el) el.value = rxCanId; return;
+    const _e=document.getElementById('rx-canid-dec'); if(_e) _e.value=parseInt(rxCanId,16);
+    const _f=document.getElementById('rx-canid-hex'); if(_f) _f.value=rxCanId.toUpperCase(); return;
   }
   if (msg.startsWith("ENDIAN=")) {
     canEndian = parseInt(msg.slice(7));
@@ -1006,15 +1008,17 @@ function showView(v) {
     updateBaudUI();
     updateEndianUI();
     updateAuxModeUI();
-    // 旧rx-canidフィールドがあれば同期
-    const rxDecEl = document.getElementById('rx-canid-dec');
-    const rxHexEl = document.getElementById('rx-canid-hex');
-    if (rxDecEl) rxDecEl.value = parseInt(rxCanId,16);
-    if (rxHexEl) rxHexEl.value = rxCanId.toUpperCase();
-    document.getElementById("rx-canid").value = rxCanId;
-    renderRxCfgList();
+    // ADC TX ID
+    const adcDecEl = document.getElementById('adc-txid-dec');
+    const adcHexEl = document.getElementById('adc-txid-hex');
+    if (adcDecEl) adcDecEl.value = parseInt(adcTxId,16);
+    if (adcHexEl) adcHexEl.value = adcTxId.toUpperCase();
+    // SW TX ID
+    const swDecEl = document.getElementById('sw-txid-dec');
+    const swHexEl = document.getElementById('sw-txid-hex');
+    if (swDecEl) swDecEl.value = parseInt(swTxId,16);
+    if (swHexEl) swHexEl.value = swTxId.toUpperCase();
     renderPinGrid();
-    renderKeypadCfgList();
     renderCoeffChBar();
     loadCoeffForm();
   }
@@ -1153,12 +1157,8 @@ function updateEndianUI() {
   document.getElementById("endian-le").classList.toggle("active", canEndian===0);
   document.getElementById("endian-be").classList.toggle("active", canEndian===1);
 }
-function setRxCanId() {
-  const v = document.getElementById("rx-canid").value.trim().replace(/^0x/i,'').toUpperCase();
-  if (!v) return;
-  rxCanId = v; localStorage.setItem("ana_rxCanId", v);
-  send("SET_RX_ID=0x"+v); log("→ SET_RX_ID=0x"+v);
-}
+// setRxCanId: 旧関数(後方互換用、setRxCanIdNew に統合済み)
+function setRxCanId() { setRxCanIdNew(); }
 function renderRxCfgList() {
   const list = document.getElementById("rx-cfg-list"); if (!list) return;
   list.innerHTML = "";
@@ -1246,14 +1246,14 @@ function togglePin(i) {
 }
 
 function applyPinModesUI() {
-  // Gauge cells: AUXピンをdim + INPUT/AUXで描画内容切替
   for (let i=0; i<NUM_CH; i++) {
     const c = document.getElementById(`gc-${i}`);
     if (c) c.classList.toggle("aux-mode", pinModes[i]!==1);
   }
-  renderAllGauges();   // ← ピンモード変化後に再描画（これが抜けていた）
+  renderAllGauges();
   renderKeypad();
   renderPinGrid();
+  renderCoeffChBar();  // ← ピンモード変更でChバーも更新
 }
 
 // ════════════════════════════════════════════
@@ -1547,14 +1547,19 @@ function hexAlpha(hex,a) {
 // COEFF SETTINGS UI
 // ════════════════════════════════════════════
 function renderCoeffChBar() {
+  // currentCoeffChがAUXになっていたら最初のINPUTピンに補正
+  if (pinModes[currentCoeffCh] === 0) {
+    const firstInput = pinModes.findIndex(m => m===1);
+    if (firstInput >= 0) currentCoeffCh = firstInput;
+  }
   const bar=document.getElementById("coeff-ch-bar"); bar.innerHTML="";
   for (let i=0;i<NUM_CH;i++) {
     const b=document.createElement("button");
     const isAux = pinModes[i]===0;
     b.className="cc-btn"+(i===currentCoeffCh?" active":"")+(isAux?" aux-ch":"");
-    b.textContent = isAux ? `P${i}(AUX)` : `P${i}`;
+    b.textContent = isAux ? `P${i}▪AUX` : `P${i}`;
     if (!isAux) b.onclick=()=>{ currentCoeffCh=i; renderCoeffChBar(); loadCoeffForm(); };
-    else b.style.cursor="default";
+    else { b.style.cursor="default"; b.title="AUXモード(係数設定不要)"; }
     bar.appendChild(b);
   }
 }
@@ -1673,8 +1678,6 @@ function log(msg) {
 // INIT
 // ════════════════════════════════════════════
 window.addEventListener("load", () => {
-  document.getElementById("adc-txid").value = adcTxId;
-  document.getElementById("sw-txid").value  = swTxId;
   buildGaugeGrid();
   renderPinGrid();
   renderKeypad();
