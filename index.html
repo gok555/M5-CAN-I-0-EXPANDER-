@@ -359,6 +359,36 @@ html, body {
 .cd-ok  { flex:1; padding:10px; background:var(--acc); color:#000; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
 .cd-cancel { flex:1; padding:10px; background:transparent; color:var(--txt); border:1.5px solid #444; border-radius:8px; cursor:pointer; }
 
+.aux-mode-row { margin-bottom:10px; }
+.aux-mode-sel {
+  width:100%; padding:9px 10px; background:#0d1a24;
+  border:1.5px solid var(--acc); border-radius:8px;
+  color:var(--txt); font-size:0.85rem; cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300e5ff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 10px center;
+  padding-right:28px;
+}
+.aux-mode-sel:focus { outline:none; border-color:var(--acc); }
+.aux-panel { margin-top:10px; }
+.aux-panel-title {
+  font-size:0.75rem; font-weight:700; color:var(--acc);
+  letter-spacing:.06em; margin-bottom:8px;
+  padding-bottom:4px; border-bottom:1px solid rgba(0,229,255,0.15);
+}
+.aux-rxid-row { display:flex; flex-direction:column; gap:4px; margin-bottom:6px; }
+.aux-rxid-lbl { font-size:0.75rem; color:var(--txt2); }
+.aux-rxid-inputs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.dec-hex-pair { display:flex; align-items:center; gap:4px; flex:1; }
+.dh-dec { width:70px; }
+.dh-hex { width:52px; text-transform:uppercase; }
+.dh-sep { font-size:0.8rem; color:var(--txt2); white-space:nowrap; }
+
+/* dec/hex 2入力フィールド (rx-cfg-list内でも使用) */
+.dh-row { display:flex; align-items:center; gap:4px; }
+.dh-row .dh-dec { width:56px; }
+.dh-row .dh-hex { width:44px; }
+
 .baud-btn {
   flex:1; min-width:56px; padding:8px 4px; border-radius:8px;
   border:2px solid var(--acc); background:transparent;
@@ -511,9 +541,14 @@ html, body {
       <!-- ADC CAN TX ID -->
       <div class="s-sec">
         <div class="s-sec-title">ADC CAN TX ID</div>
-        <div class="id-row">
-          <label>0x</label>
-          <input type="text" id="adc-txid" maxlength="3" placeholder="500">
+        <div class="aux-rxid-inputs">
+          <div class="dec-hex-pair">
+            <input type="number" id="adc-txid-dec" class="dh-dec" placeholder="1280" min="0" max="2047"
+              oninput="syncHex('adc-txid-dec','adc-txid-hex')">
+            <span class="dh-sep">= 0x</span>
+            <input type="text" id="adc-txid-hex" class="dh-hex" placeholder="500" maxlength="3"
+              oninput="syncDec('adc-txid-hex','adc-txid-dec')">
+          </div>
           <button class="s-set-btn" onclick="setAdcTxId()">SET</button>
         </div>
         <div class="id-note">Frame1: TxID, Frame2: TxID+1 (各4ch 2byteLE)</div>
@@ -522,9 +557,14 @@ html, body {
       <!-- SW CAN TX ID -->
       <div class="s-sec">
         <div class="s-sec-title">SWITCH CAN TX ID</div>
-        <div class="id-row">
-          <label>0x</label>
-          <input type="text" id="sw-txid" maxlength="3" placeholder="5A0">
+        <div class="aux-rxid-inputs">
+          <div class="dec-hex-pair">
+            <input type="number" id="sw-txid-dec" class="dh-dec" placeholder="1440" min="0" max="2047"
+              oninput="syncHex('sw-txid-dec','sw-txid-hex')">
+            <span class="dh-sep">= 0x</span>
+            <input type="text" id="sw-txid-hex" class="dh-hex" placeholder="5A0" maxlength="3"
+              oninput="syncDec('sw-txid-hex','sw-txid-dec')">
+          </div>
           <button class="s-set-btn" onclick="setSwTxId()">SET</button>
         </div>
         <div class="id-note">AUX Keypadの状態を1フレームで送信 (8バイト)</div>
@@ -552,17 +592,6 @@ html, body {
         <div class="id-note">LE: [val&0xFF, val>>8]　BE: [val>>8, val&0xFF]</div>
       </div>
 
-      <!-- CAN RX (EMTRON) -->
-      <div class="s-sec">
-        <div class="s-sec-title">CAN 受信設定 (EMTRON → AUX)</div>
-        <div class="id-row">
-          <label>RX ID: 0x</label>
-          <input type="text" id="rx-canid" maxlength="3" placeholder="600">
-          <button class="s-set-btn" onclick="setRxCanId()">SET</button>
-        </div>
-        <div class="id-note">EMTRONからのCAN IDを設定。AUXピンのみ有効。CAN受信が優先されます。</div>
-        <div class="kp-cfg-list" id="rx-cfg-list" style="margin-top:8px;"></div>
-      </div>
 
       <!-- PIN MODES -->
       <div class="s-sec">
@@ -572,21 +601,42 @@ html, body {
         <button class="save-btn-full" onclick="confirmPinModeSet()" style="margin-top:8px;">📡 ピンモードSET &amp; 再起動</button>
       </div>
 
-      <!-- AUX CTRL MODE -->
+      <!-- AUX CTRL MODE + 条件パネル -->
       <div class="s-sec">
         <div class="s-sec-title">AUX 制御モード</div>
-        <div class="id-row" style="gap:8px;">
-          <button class="endian-btn" id="aux-keypad-btn" onclick="setAuxMode(0)">📱 Keypad (BLE)</button>
-          <button class="endian-btn" id="aux-canrx-btn"  onclick="setAuxMode(1)">📡 CAN RX</button>
+        <div class="aux-mode-row">
+          <select id="aux-mode-sel" class="aux-mode-sel" onchange="setAuxMode(parseInt(this.value))">
+            <option value="0">📱 Keypad モード (スマホBLE操作)</option>
+            <option value="1">📡 CAN RX モード (外部CAN信号制御)</option>
+          </select>
         </div>
-        <div class="id-note">Keypad: スマホから操作　CAN RX: 外部CAN信号で制御（排他）</div>
-      </div>
 
-      <!-- KEYPAD BUTTON CONFIG (AUX pins only) -->
-      <div class="s-sec" id="kp-cfg-sec">
-        <div class="s-sec-title">KEYPAD ボタン設定 (AUX)</div>
-        <div class="kp-cfg-list" id="kp-cfg-list">
-          <div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>
+        <!-- Keypadモード: ボタン設定パネル -->
+        <div id="aux-panel-keypad" class="aux-panel">
+          <div class="aux-panel-title">📱 Keypad ボタン設定</div>
+          <div class="kp-cfg-list" id="kp-cfg-list">
+            <div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>
+          </div>
+        </div>
+
+        <!-- CAN RXモード: 受信ID＋ON/OFF値設定パネル -->
+        <div id="aux-panel-canrx" class="aux-panel" style="display:none;">
+          <div class="aux-panel-title">📡 CAN RX 受信設定</div>
+          <div class="aux-rxid-row">
+            <label class="aux-rxid-lbl">受信 CAN ID</label>
+            <div class="aux-rxid-inputs">
+              <div class="dec-hex-pair">
+                <input type="number" id="rx-canid-dec" class="dh-dec" placeholder="1536" min="0" max="2047"
+                  oninput="syncHex('rx-canid-dec','rx-canid-hex')">
+                <span class="dh-sep">= 0x</span>
+                <input type="text"   id="rx-canid-hex" class="dh-hex" placeholder="600" maxlength="3"
+                  oninput="syncDec('rx-canid-hex','rx-canid-dec')">
+              </div>
+              <button class="s-set-btn" onclick="setRxCanIdNew()">SET</button>
+            </div>
+          </div>
+          <div class="id-note" style="margin-bottom:6px;">EMTRONが送信するCAN ID (AUXピンのみ有効)</div>
+          <div class="kp-cfg-list" id="rx-cfg-list"></div>
         </div>
       </div>
 
@@ -865,11 +915,15 @@ function parseMsg(msg) {
   if (msg.startsWith("TXID=")) {
     adcTxId = msg.slice(5).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_adcTxId", adcTxId);
+    const d=document.getElementById('adc-txid-dec'); if(d) d.value=parseInt(adcTxId,16);
+    const h=document.getElementById('adc-txid-hex'); if(h) h.value=adcTxId;
     document.getElementById("adc-txid").value = adcTxId; return;
   }
   if (msg.startsWith("SW_TXID=")) {
     swTxId = msg.slice(8).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_swTxId", swTxId);
+    const d=document.getElementById('sw-txid-dec'); if(d) d.value=parseInt(swTxId,16);
+    const h=document.getElementById('sw-txid-hex'); if(h) h.value=swTxId;
     document.getElementById("sw-txid").value = swTxId; return;
   }
   if (msg.startsWith("STATUS=")) {
@@ -950,6 +1004,11 @@ function showView(v) {
     updateBaudUI();
     updateEndianUI();
     updateAuxModeUI();
+    // 旧rx-canidフィールドがあれば同期
+    const rxDecEl = document.getElementById('rx-canid-dec');
+    const rxHexEl = document.getElementById('rx-canid-hex');
+    if (rxDecEl) rxDecEl.value = parseInt(rxCanId,16);
+    if (rxHexEl) rxHexEl.value = rxCanId.toUpperCase();
     document.getElementById("rx-canid").value = rxCanId;
     renderRxCfgList();
     renderPinGrid();
@@ -1023,13 +1082,51 @@ function setAuxMode(v) {
   log('→ AUX MODE: ' + (v===0 ? 'Keypad' : 'CAN RX'));
 }
 function updateAuxModeUI() {
-  const kp = document.getElementById('aux-keypad-btn');
-  const cr = document.getElementById('aux-canrx-btn');
-  if (kp) kp.classList.toggle('active', auxCtrlMode===0);
-  if (cr) cr.classList.toggle('active', auxCtrlMode===1);
-  // Keypadビューのボタンをグレーアウト
+  // プルダウン同期
+  const sel = document.getElementById('aux-mode-sel');
+  if (sel) sel.value = String(auxCtrlMode);
+  // パネル切替
+  const pkp = document.getElementById('aux-panel-keypad');
+  const pcr = document.getElementById('aux-panel-canrx');
+  if (pkp) pkp.style.display = auxCtrlMode===0 ? '' : 'none';
+  if (pcr) pcr.style.display = auxCtrlMode===1 ? '' : 'none';
+  // Keypadビューのグレーアウト
   const kpView = document.getElementById('view-keypad');
   if (kpView) kpView.classList.toggle('canrx-mode', auxCtrlMode===1);
+  // RX設定パネル更新
+  if (auxCtrlMode===1) {
+    const decEl = document.getElementById('rx-canid-dec');
+    const hexEl = document.getElementById('rx-canid-hex');
+    if (decEl) decEl.value = parseInt(rxCanId, 16);
+    if (hexEl) hexEl.value = rxCanId.toUpperCase();
+    renderRxCfgList();
+  } else {
+    renderKeypadCfgList();
+  }
+}
+
+// ── Dec/Hex 双方向同期ヘルパー ──
+function syncHex(decId, hexId) {
+  const el = document.getElementById(decId);
+  const hexEl = document.getElementById(hexId);
+  if (!el || !hexEl) return;
+  const v = parseInt(el.value);
+  if (isNaN(v) || v<0) return;
+  const maxLen = parseInt(hexEl.maxLength) || 3;
+  hexEl.value = v.toString(16).toUpperCase().padStart(maxLen,'0');
+}
+function syncDec(hexId, decId) {
+  const v = parseInt(document.getElementById(hexId).value, 16);
+  if (!isNaN(v)) document.getElementById(decId).value = v;
+}
+function setRxCanIdNew() {
+  const dec = parseInt(document.getElementById('rx-canid-dec').value);
+  if (isNaN(dec) || dec<0 || dec>2047) return;
+  const hexStr = dec.toString(16).toUpperCase().padStart(3,'0');
+  rxCanId = hexStr;
+  localStorage.setItem("ana_rxCanId", rxCanId);
+  document.getElementById('rx-canid-hex').value = hexStr;
+  send("SET_RX_ID=0x"+hexStr); log("→ SET_RX_ID=0x"+hexStr);
 }
 
 function setBaud(v) {
@@ -1071,16 +1168,31 @@ function renderRxCfgList() {
   auxPins.forEach(pin => {
     const row = document.createElement("div");
     row.className = "kp-cfg-row";
+    const onD=rxOnVals[pin], offD=rxOffVals[pin];
+    const onH=onD.toString(16).toUpperCase().padStart(2,'0');
+    const offH=offD.toString(16).toUpperCase().padStart(2,'0');
     row.innerHTML = `
-      <div class="kp-cfg-pin">P${pin}</div>
-      <div class="kp-cfg-fields">
-        <div class="kp-cfg-field">
-          <label>RX ON値</label>
-          <input type="number" id="rx-on-${pin}" value="${rxOnVals[pin]}" min="0" max="255" style="width:60px;">
+      <div class="kr-head"><span class="kr-pin">PIN ${pin}</span></div>
+      <div class="kr-fields">
+        <div>
+          <div class="kr-label">RX ON値</div>
+          <div class="dh-row">
+            <input class="dh-dec" type="number" id="rx-on-d-${pin}" value="${onD}" min="0" max="255"
+              oninput="syncHex('rx-on-d-${pin}','rx-on-h-${pin}')">
+            <span class="dh-sep">0x</span>
+            <input class="dh-hex" type="text" id="rx-on-h-${pin}" value="${onH}" maxlength="2"
+              oninput="syncDec('rx-on-h-${pin}','rx-on-d-${pin}')">
+          </div>
         </div>
-        <div class="kp-cfg-field">
-          <label>RX OFF値</label>
-          <input type="number" id="rx-off-${pin}" value="${rxOffVals[pin]}" min="0" max="255" style="width:60px;">
+        <div>
+          <div class="kr-label">RX OFF値</div>
+          <div class="dh-row">
+            <input class="dh-dec" type="number" id="rx-off-d-${pin}" value="${offD}" min="0" max="255"
+              oninput="syncHex('rx-off-d-${pin}','rx-off-h-${pin}')">
+            <span class="dh-sep">0x</span>
+            <input class="dh-hex" type="text" id="rx-off-h-${pin}" value="${offH}" maxlength="2"
+              oninput="syncDec('rx-off-h-${pin}','rx-off-d-${pin}')">
+          </div>
         </div>
         <button class="s-set-btn" onclick="setRxVal(${pin})">SET</button>
       </div>`;
@@ -1088,24 +1200,28 @@ function renderRxCfgList() {
   });
 }
 function setRxVal(pin) {
-  const on  = parseInt(document.getElementById("rx-on-"+pin).value)||1;
-  const off = parseInt(document.getElementById("rx-off-"+pin).value)||0;
+  const on  = parseInt(document.getElementById("rx-on-d-"+pin).value)  || 0;
+  const off = parseInt(document.getElementById("rx-off-d-"+pin).value) || 0;
   rxOnVals[pin] = on; rxOffVals[pin] = off;
   send("RX_ON="+pin+","+on);   log("→ RX_ON="+pin+","+on);
   send("RX_OFF="+pin+","+off); log("→ RX_OFF="+pin+","+off);
 }
 
 function setAdcTxId() {
-  const v = document.getElementById("adc-txid").value.trim().replace(/^0x/i,'').toUpperCase();
-  if (!v) return;
-  adcTxId = v; localStorage.setItem("ana_adcTxId", v);
-  send("SET_TXID=0x"+v); log("→ SET_TXID=0x"+v);
+  const dec = parseInt(document.getElementById('adc-txid-dec').value);
+  if (isNaN(dec) || dec<0 || dec>2047) return;
+  const h = dec.toString(16).toUpperCase().padStart(3,'0');
+  document.getElementById('adc-txid-hex').value = h;
+  adcTxId = h; localStorage.setItem("ana_adcTxId", h);
+  send("SET_TXID=0x"+h); log("→ SET_TXID=0x"+h);
 }
 function setSwTxId() {
-  const v = document.getElementById("sw-txid").value.trim().replace(/^0x/i,'').toUpperCase();
-  if (!v) return;
-  swTxId = v; localStorage.setItem("ana_swTxId", v);
-  send("SW_TXID=0x"+v); log("→ SW_TXID=0x"+v);
+  const dec = parseInt(document.getElementById('sw-txid-dec').value);
+  if (isNaN(dec) || dec>2047) return;
+  const h = dec.toString(16).toUpperCase().padStart(3,'0');
+  document.getElementById('sw-txid-hex').value = h;
+  swTxId = h; localStorage.setItem("ana_swTxId", h);
+  send("SW_TXID=0x"+h); log("→ SW_TXID=0x"+h);
 }
 
 function renderPinGrid() {
@@ -1168,12 +1284,24 @@ function renderKeypadCfgList() {
           <input type="text" id="kr-lbl-${pin}" value="${meta.label}" maxlength="8" style="width:100%">
         </div>
         <div>
-          <div class="kr-label">ON値(dec)</div>
-          <input type="number" id="kr-on-${pin}" value="${swOnVals[pin]}" min="0" max="255" style="width:100%">
+          <div class="kr-label">ON値</div>
+          <div class="dh-row">
+            <input class="dh-dec" type="number" id="kr-on-${pin}" value="${swOnVals[pin]}" min="0" max="255"
+              oninput="syncHex('kr-on-'+${pin},'kr-on-h-'+${pin})">
+            <span class="dh-sep">0x</span>
+            <input class="dh-hex" type="text" id="kr-on-h-${pin}" value="${swOnVals[pin].toString(16).toUpperCase().padStart(2,'0')}" maxlength="2"
+              oninput="syncDec('kr-on-h-'+${pin},'kr-on-'+${pin})">
+          </div>
         </div>
         <div>
-          <div class="kr-label">OFF値(dec)</div>
-          <input type="number" id="kr-off-${pin}" value="${swOffVals[pin]}" min="0" max="255" style="width:100%">
+          <div class="kr-label">OFF値</div>
+          <div class="dh-row">
+            <input class="dh-dec" type="number" id="kr-off-${pin}" value="${swOffVals[pin]}" min="0" max="255"
+              oninput="syncHex('kr-off-'+${pin},'kr-off-h-'+${pin})">
+            <span class="dh-sep">0x</span>
+            <input class="dh-hex" type="text" id="kr-off-h-${pin}" value="${swOffVals[pin].toString(16).toUpperCase().padStart(2,'0')}" maxlength="2"
+              oninput="syncDec('kr-off-h-'+${pin},'kr-off-'+${pin})">
+          </div>
         </div>
         <button class="s-set-btn" onclick="saveBtnCfg(${pin})">SET</button>
       </div>`;
