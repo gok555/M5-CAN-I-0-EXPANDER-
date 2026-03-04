@@ -128,6 +128,35 @@ html, body {
   transition: border-color 0.3s;
 }
 .gauge-cell.aux-mode { opacity: 0.35; }
+.gauge-cell.aux-btn  {
+  cursor: pointer; touch-action: none;
+  border: 2px solid var(--sw-off);
+  background: var(--bg2);
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 5px;
+  transition: all 0.12s; -webkit-touch-callout: none;
+}
+.gauge-cell.aux-btn.on {
+  border-color: var(--sw-on);
+  background: linear-gradient(135deg, rgba(0,255,136,0.13), rgba(0,255,136,0.04));
+  box-shadow: 0 0 18px rgba(0,255,136,0.22), inset 0 0 10px rgba(0,255,136,0.07);
+}
+.gauge-cell.aux-btn:active { transform: scale(0.96); opacity: 0.85; }
+.gc-btn-label {
+  font-family: var(--head); font-weight: 700;
+  font-size: clamp(0.9rem, 4.5vw, 1.8rem); letter-spacing: 0.07em;
+  color: var(--txt); pointer-events: none; transition: color 0.12s;
+}
+.gauge-cell.aux-btn.on .gc-btn-label { color: var(--sw-on); text-shadow: 0 0 8px rgba(0,255,136,0.5); }
+.gc-btn-sub {
+  font-size: 0.62rem; color: var(--txt2); pointer-events: none;
+  text-align: center; line-height: 1.4;
+}
+.gauge-cell.aux-btn.on .gc-btn-sub { color: var(--sw-on); }
+.gc-btn-pin {
+  font-size: 0.58rem; color: var(--txt2); opacity: 0.6;
+  pointer-events: none; font-family: var(--head); letter-spacing: .06em;
+}
 .gauge-cell canvas { display: block; width: 100%; height: 100%; }
 
 /* ════════ KEYPAD VIEW ═══════════════════ */
@@ -487,7 +516,6 @@ html, body {
     <div id="can-badge"  class="t-badge">CAN --</div>
     <div class="t-tabs">
       <button class="t-tab active" id="tab-gauge"  onclick="showView('gauge')">📊</button>
-      <button class="t-tab"        id="tab-keypad" onclick="showView('keypad')">🎛</button>
       <button class="t-tab"        id="tab-cfg"    onclick="showView('settings')">⚙️</button>
     </div>
   </div>
@@ -587,9 +615,11 @@ html, body {
       <!-- ADC ENDIAN -->
       <div class="s-sec">
         <div class="s-sec-title">ADC CAN エンディアン</div>
-        <div class="id-row" style="gap:8px;">
-          <button class="endian-btn" id="endian-le" onclick="setEndian(0)">リトルエンディアン (LE)</button>
-          <button class="endian-btn" id="endian-be" onclick="setEndian(1)">ビッグエンディアン (BE)</button>
+        <div class="aux-mode-row">
+          <select id="endian-sel" class="aux-mode-sel" onchange="setEndian(parseInt(this.value))">
+            <option value="0">🔢 リトルエンディアン (LE) ― バイト順: LSB → MSB</option>
+            <option value="1">🔡 ビッグエンディアン (BE) ― バイト順: MSB → LSB</option>
+          </select>
         </div>
         <div class="id-note">LE: [val&0xFF, val>>8]　BE: [val>>8, val&0xFF]</div>
       </div>
@@ -949,7 +979,7 @@ function parseMsg(msg) {
   }
   if (msg.startsWith("SW_VALS=")) {
     msg.slice(8).split(',').forEach((v,i) => { if (i<NUM_CH) swVals[i] = parseInt(v)||0; });
-    renderKeypad(); return;
+    updateAllAuxBtns(); renderKeypad(); return;
   }
   if (msg.startsWith("PIN_MODES=")) {
     msg.slice(10).split(',').forEach((v,i) => { if (i<NUM_CH) pinModes[i] = parseInt(v)||0; });
@@ -1052,8 +1082,10 @@ function showView(v) {
   document.getElementById("connect-overlay").style.display = "none";
   currentView = v;
   ["gauge","keypad","settings"].forEach(n => {
-    document.getElementById("view-"+n).classList.toggle("active", n===v);
-    document.getElementById("tab-"+(n==="settings"?"cfg":n)).classList.toggle("active", n===v);
+    const vEl = document.getElementById("view-"+n);
+    if (vEl) vEl.classList.toggle("active", n===v);
+    const tEl = document.getElementById("tab-"+(n==="settings"?"cfg":n));
+    if (tEl) tEl.classList.toggle("active", n===v);
   });
   if (v === "gauge") {
     // settingsから戻るとCanvasサイズが0になるため再計算
@@ -1209,8 +1241,8 @@ function setEndian(v) {
   send("SET_ENDIAN="+v); log("→ SET_ENDIAN="+(v===0?"LE":"BE"));
 }
 function updateEndianUI() {
-  document.getElementById("endian-le").classList.toggle("active", canEndian===0);
-  document.getElementById("endian-be").classList.toggle("active", canEndian===1);
+  const sel = document.getElementById("endian-sel");
+  if (sel) sel.value = String(canEndian);
 }
 // setRxCanId: 旧関数(後方互換用、setRxCanIdNew に統合済み)
 function setRxCanId() { setRxCanIdNew(); }
@@ -1301,14 +1333,11 @@ function togglePin(i) {
 }
 
 function applyPinModesUI() {
-  for (let i=0; i<NUM_CH; i++) {
-    const c = document.getElementById(`gc-${i}`);
-    if (c) c.classList.toggle("aux-mode", pinModes[i]!==1);
-  }
-  renderAllGauges();
-  renderKeypad();
+  // セルを再構築（INPUT↔AUX切替で構造が変わるため）
+  buildGaugeGrid();
+  requestAnimationFrame(() => { sizeCanvases(); updateAllAuxBtns(); });
   renderPinGrid();
-  renderCoeffChBar();  // ← ピンモード変更でChバーも更新
+  renderCoeffChBar();
 }
 
 // ════════════════════════════════════════════
@@ -1482,13 +1511,33 @@ function buildGaugeGrid() {
   const g = document.getElementById("gauge-grid"); g.innerHTML = "";
   for (let i=0; i<NUM_CH; i++) {
     const cell = document.createElement("div");
-    cell.className = "gauge-cell" + (pinModes[i]!==1?" aux-mode":"");
     cell.id = `gc-${i}`;
-    const cvs = document.createElement("canvas");
-    cvs.id = `gcv-${i}`;
-    cell.appendChild(cvs); g.appendChild(cell);
+    if (pinModes[i] === 0) {
+      // AUXピン → ボタンセル
+      _buildAuxCell(cell, i);
+    } else {
+      // INPUTピン → ゲージセル
+      cell.className = "gauge-cell";
+      const cvs = document.createElement("canvas");
+      cvs.id = `gcv-${i}`;
+      cell.appendChild(cvs);
+    }
+    g.appendChild(cell);
   }
   requestAnimationFrame(sizeCanvases);
+}
+
+function _buildAuxCell(cell, i) {
+  const meta = btnMeta[i];
+  const isOn = swVals[i] === swOnVals[i];
+  cell.className = "gauge-cell aux-btn" + (isOn ? " on" : "");
+  cell.innerHTML = `
+    <div class="gc-btn-pin">P${i}</div>
+    <div class="gc-btn-label">${meta.label}</div>
+    <div class="gc-btn-sub">${meta.mode==="momentary"?"PULSE":"TOGGLE"}</div>`;
+  cell.addEventListener("pointerdown", e => { e.preventDefault(); handleBtnDown(i); });
+  cell.addEventListener("pointerup",   e => { e.preventDefault(); handleBtnUp(i); });
+  cell.addEventListener("contextmenu", e => e.preventDefault());
 }
 
 function sizeCanvases() {
@@ -1505,7 +1554,27 @@ function sizeCanvases() {
   renderAllGauges();
 }
 
-function renderAllGauges() { for (let i=0;i<NUM_CH;i++) drawGauge(i); }
+function renderAllGauges() {
+  for (let i=0;i<NUM_CH;i++) {
+    if (pinModes[i]===0) updateAuxBtn(i);
+    else drawGauge(i);
+  }
+}
+
+function updateAuxBtn(i) {
+  const cell = document.getElementById(`gc-${i}`);
+  if (!cell || !cell.classList.contains("aux-btn")) return;
+  const isOn = swVals[i] === swOnVals[i];
+  cell.classList.toggle("on", isOn);
+  const lbl = cell.querySelector(".gc-btn-label");
+  if (lbl) lbl.textContent = btnMeta[i].label;
+  const sub = cell.querySelector(".gc-btn-sub");
+  if (sub) sub.textContent = btnMeta[i].mode==="momentary"?"PULSE":"TOGGLE";
+}
+
+function updateAllAuxBtns() {
+  for (let i=0;i<NUM_CH;i++) if (pinModes[i]===0) updateAuxBtn(i);
+}
 
 function drawGauge(ch) {
   const cvs = document.getElementById(`gcv-${ch}`); if (!cvs) return;
