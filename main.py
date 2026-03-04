@@ -1,1841 +1,774 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>I/O CAN</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700;900&display=swap');
-
-:root {
-  --bg:      #080b0f;
-  --bg2:     #0e1218;
-  --bg3:     #161b22;
-  --border:  #1f2a38;
-  --accent:  #00e5ff;
-  --accent2: #ff6b00;
-  --ok:      #00ff88;
-  --err:     #ff3355;
-  --warn:    #ffcc00;
-  --sw-on:   #00ff88;
-  --sw-off:  #1f2a38;
-  --txt:     #bcc8da;
-  --txt2:    #4a5568;
-  --mono:    'Share Tech Mono', monospace;
-  --head:    'Barlow Condensed', sans-serif;
-}
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  width: 100%; height: 100%; height: 100dvh;
-  background: var(--bg); color: var(--txt);
-  font-family: var(--mono); overflow: hidden;
-  touch-action: manipulation;
-  user-select: none; -webkit-user-select: none;
-}
-
-/* ══════════ LAYOUT ══════════════════════ */
-#app { width: 100%; height: 100%; display: flex; flex-direction: column; }
-
-/* ══════════ TOPBAR ══════════════════════ */
-#topbar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 8px; height: 42px; flex-shrink: 0;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  position: relative; z-index: 20;
-}
-.t-title {
-  font-family: var(--head); font-weight: 900;
-  font-size: 1.2rem; letter-spacing: 0.18em;
-  color: var(--accent); text-transform: uppercase;
-}
-.t-spacer { flex: 1; }
-.t-badge {
-  font-size: 0.65rem; letter-spacing: 0.06em;
-  padding: 3px 7px; border-radius: 3px;
-  border: 1px solid var(--border);
-  color: var(--txt2); background: var(--bg3);
-  transition: all 0.35s;
-}
-.t-badge.ok  { color: var(--ok);  border-color: var(--ok); }
-.t-badge.err { color: var(--err); border-color: var(--err); }
-.t-badge.ble { color: var(--accent); border-color: var(--accent); }
-
-/* tab buttons */
-.t-tabs { display: flex; gap: 2px; }
-.t-tab {
-  font-family: var(--head); font-weight: 700;
-  font-size: 0.75rem; letter-spacing: 0.1em;
-  padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border);
-  background: none; color: var(--txt2); cursor: pointer;
-  transition: all 0.2s; text-transform: uppercase;
-}
-.t-tab.active { background: var(--accent); color: #000; border-color: var(--accent); }
-.t-icon-btn {
-  background: none; border: 1px solid var(--border);
-  color: var(--txt2); font-size: 1rem; cursor: pointer;
-  padding: 4px 9px; border-radius: 4px; transition: all 0.2s;
-}
-.t-icon-btn:active { border-color: var(--accent); color: var(--accent); }
-
-/* ══════════ CONNECT OVERLAY ═════════════ */
-#connect-overlay {
-  position: absolute; inset: 42px 0 0 0;
-  display: flex; flex-direction: column;
-  justify-content: center; align-items: center;
-  background: var(--bg); z-index: 100;
-}
-#connect-overlay .co-logo {
-  font-family: var(--head); font-size: 2.2rem; font-weight: 900;
-  letter-spacing: 0.2em; color: var(--accent2); margin-bottom: 6px;
-}
-#connect-overlay .co-sub {
-  font-size: 0.72rem; color: var(--txt2); letter-spacing: 0.1em; margin-bottom: 36px;
-}
-#connect-btn {
-  width: 150px; height: 150px; border-radius: 50%;
-  border: 2px solid var(--accent);
-  background: radial-gradient(circle at 40% 35%, rgba(0,229,255,0.1), transparent 70%);
-  color: var(--accent); font-family: var(--head);
-  font-size: 1.2rem; font-weight: 700; letter-spacing: 0.12em;
-  cursor: pointer; text-transform: uppercase;
-  box-shadow: 0 0 28px rgba(0,229,255,0.18), inset 0 0 18px rgba(0,229,255,0.06);
-  display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 4px;
-  transition: all 0.25s;
-}
-#connect-btn:active { transform: scale(0.95); box-shadow: 0 0 48px rgba(0,229,255,0.36); }
-#connect-btn .ci { font-size: 1.8rem; }
-
-/* ══════════ VIEWS ═══════════════════════ */
-#content { flex: 1; overflow: hidden; position: relative; }
-.view { position: absolute; inset: 0; display: none; flex-direction: column; }
-.view.active { display: flex; }
-
-/* ════════ GAUGE VIEW ════════════════════ */
-#view-gauge { background: var(--bg); padding: 5px; }
-#gauge-grid {
-  display: grid; width: 100%; height: 100%; gap: 4px;
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(4, 1fr);
-}
-@media (orientation: landscape) {
-  #gauge-grid { grid-template-columns: repeat(4,1fr); grid-template-rows: repeat(2,1fr); }
-}
-.gauge-cell {
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: 8px; overflow: hidden; position: relative;
-  transition: border-color 0.3s;
-}
-.gauge-cell.aux-mode { opacity: 0.35; }
-.gauge-cell.aux-btn  {
-  cursor: pointer; touch-action: none;
-  border: 2px solid var(--sw-off);
-  background: var(--bg2);
-  display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 5px;
-  transition: all 0.12s; -webkit-touch-callout: none;
-}
-.gauge-cell.aux-btn.on {
-  border-color: var(--sw-on);
-  background: linear-gradient(135deg, rgba(0,255,136,0.13), rgba(0,255,136,0.04));
-  box-shadow: 0 0 18px rgba(0,255,136,0.22), inset 0 0 10px rgba(0,255,136,0.07);
-}
-.gauge-cell.aux-btn:active { transform: scale(0.96); opacity: 0.85; }
-.gc-btn-label {
-  font-family: var(--head); font-weight: 700;
-  font-size: clamp(0.9rem, 4.5vw, 1.8rem); letter-spacing: 0.07em;
-  color: var(--txt); pointer-events: none; transition: color 0.12s;
-}
-.gauge-cell.aux-btn.on .gc-btn-label { color: var(--sw-on); text-shadow: 0 0 8px rgba(0,255,136,0.5); }
-.gc-btn-sub {
-  font-size: 0.62rem; color: var(--txt2); pointer-events: none;
-  text-align: center; line-height: 1.4;
-}
-.gauge-cell.aux-btn.on .gc-btn-sub { color: var(--sw-on); }
-.gc-btn-pin {
-  font-size: 0.58rem; color: var(--txt2); opacity: 0.6;
-  pointer-events: none; font-family: var(--head); letter-spacing: .06em;
-}
-.gauge-cell canvas { display: block; width: 100%; height: 100%; }
-
-/* ════════ KEYPAD VIEW ═══════════════════ */
-#view-keypad { background: var(--bg); padding: 5px; overflow: hidden; }
-#keypad-empty {
-  flex: 1; display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 12px;
-  color: var(--txt2);
-}
-#keypad-empty .ke-icon { font-size: 3rem; }
-#keypad-empty .ke-txt { font-family: var(--head); font-size: 1rem; letter-spacing: 0.1em; }
-#keypad-grid {
-  display: none; width: 100%; height: 100%; gap: 6px;
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(4, 1fr);
-}
-#keypad-grid.visible { display: grid; }
-@media (orientation: landscape) {
-  #keypad-grid.visible { grid-template-columns: repeat(4,1fr); grid-template-rows: repeat(2,1fr); }
-}
-
-.kp-btn {
-  border-radius: 12px; border: 2px solid var(--sw-off);
-  background: var(--bg2);
-  display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 6px;
-  cursor: pointer; position: relative; overflow: hidden;
-  transition: all 0.12s;
-  -webkit-touch-callout: none; touch-action: none;
-}
-.kp-btn .kb-label {
-  font-family: var(--head); font-weight: 700;
-  font-size: clamp(1rem, 5vw, 2rem); letter-spacing: 0.08em;
-  color: var(--txt); transition: color 0.12s;
-  pointer-events: none;
-}
-.kp-btn .kb-val {
-  font-size: 0.7rem; color: var(--txt2);
-  pointer-events: none;
-}
-.kp-btn.on {
-  border-color: var(--sw-on);
-  background: linear-gradient(135deg, rgba(0,255,136,0.12), rgba(0,255,136,0.04));
-  box-shadow: 0 0 16px rgba(0,255,136,0.2), inset 0 0 10px rgba(0,255,136,0.06);
-}
-.kp-btn.on .kb-label { color: var(--sw-on); text-shadow: 0 0 8px rgba(0,255,136,0.5); }
-.kp-btn.on .kb-val { color: var(--sw-on); }
-.kp-btn:active, .kp-btn.pressing { transform: scale(0.95); opacity: 0.85; }
-
-/* momentary pulse ring */
-@keyframes pulse-ring {
-  0%   { transform: scale(1); opacity: 0.7; }
-  100% { transform: scale(2.5); opacity: 0; }
-}
-.kp-btn.momentary-flash::after {
-  content: ""; position: absolute; inset: 0; border-radius: 10px;
-  border: 2px solid var(--sw-on);
-  animation: pulse-ring 0.4s ease-out forwards;
-}
-
-/* ════════ SETTINGS VIEW ════════════════ */
-#view-settings {
-  background: var(--bg2); overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.s-hdr {
-  position: sticky; top: 0; z-index: 10;
-  background: var(--bg3); border-bottom: 1px solid var(--border);
-  padding: 10px 14px; flex-shrink: 0;
-  display: flex; align-items: center;
-}
-.s-hdr-title {
-  flex: 1; text-align: center;
-  font-family: var(--head); font-size: 1.1rem; font-weight: 700;
-  letter-spacing: 0.15em; color: var(--accent);
-}
-.s-back { background: none; border: none; color: var(--txt); font-size: 1.4rem; cursor: pointer; padding: 4px 10px; }
-
-.s-sec { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.s-sec-title {
-  font-family: var(--head); font-size: 0.8rem; font-weight: 700;
-  letter-spacing: 0.14em; color: var(--txt2);
-  margin-bottom: 10px; text-transform: uppercase;
-}
-
-/* ID row */
-.id-row { display: flex; align-items: center; gap: 8px; }
-.id-row label { font-size: 0.8rem; color: var(--txt2); white-space: nowrap; }
-.id-row input {
-  flex: 1; background: var(--bg3); border: 1px solid var(--border);
-  color: var(--accent); font-family: var(--mono); font-size: 1.1rem;
-  padding: 10px; border-radius: 5px; text-align: center; min-width: 0;
-}
-.id-row input:focus { outline: none; border-color: var(--accent); }
-.id-note { font-size: 0.68rem; color: var(--txt2); margin-top: 4px; }
-
-/* set btn */
-.s-set-btn {
-  padding: 10px 16px; background: var(--accent2); border: none;
-  border-radius: 5px; color: #fff; font-family: var(--head);
-  font-weight: 700; font-size: 0.9rem; cursor: pointer; white-space: nowrap;
-}
-.s-ok-btn {
-  padding: 10px 16px; background: var(--ok); border: none;
-  border-radius: 5px; color: #000; font-family: var(--head);
-  font-weight: 700; font-size: 0.9rem; cursor: pointer;
-}
-
-/* pin grid */
-.pin-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
-.pin-card {
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 6px; padding: 8px 4px;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  cursor: pointer; transition: all 0.18s;
-}
-.pin-card .pc-num { font-family: var(--head); font-size: 0.85rem; color: var(--txt2); font-weight: 700; }
-.pin-card .pc-mode { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; }
-.pin-card.input-mode { border-color: var(--ok); }
-.pin-card.input-mode .pc-mode { color: var(--ok); }
-.pin-card.aux-mode .pc-mode { color: var(--txt2); }
-.pin-card:active { transform: scale(0.95); }
-
-/* coeff channel select */
-.coeff-ch-bar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
-.cc-btn {
-  padding: 5px 9px; background: var(--bg3);
-  border: 1px solid var(--border); border-radius: 4px;
-  color: var(--txt2); font-family: var(--mono); font-size: 0.78rem;
-  cursor: pointer; transition: all 0.15s;
-}
-.cc-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,0.07); }
-.cc-btn.aux-ch { border-style: dashed; color: var(--txt2); }
-
-/* keypad button config list */
-.kp-cfg-list { display: flex; flex-direction: column; gap: 8px; }
-.kp-cfg-row {
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 6px; padding: 10px;
-}
-.kp-cfg-row .kr-head {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
-}
-.kp-cfg-row .kr-pin {
-  font-family: var(--head); font-size: 0.85rem; font-weight: 700;
-  color: var(--accent); letter-spacing: 0.1em;
-}
-.kp-cfg-row input[type=text], .kp-cfg-row input[type=number] {
-  background: var(--bg); border: 1px solid var(--border);
-  color: var(--txt); font-family: var(--mono); font-size: 0.9rem;
-  padding: 7px; border-radius: 4px; text-align: center;
-}
-.kp-cfg-row input:focus { outline: none; border-color: var(--accent); }
-.kr-fields { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; }
-.kr-label { font-size: 0.7rem; color: var(--txt2); text-align: center; }
-.kr-mode-sw { display: flex; background: var(--bg); border-radius: 4px; padding: 2px; gap: 3px; }
-.kr-mode-opt {
-  border: none; background: none; color: var(--txt2);
-  font-size: 0.78rem; padding: 5px 8px; border-radius: 3px; cursor: pointer;
-}
-.kr-mode-opt.sel { background: var(--border); color: #fff; font-weight: 700; }
-
-/* coeff form */
-.coeff-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.cf-field { display: flex; flex-direction: column; gap: 4px; }
-.cf-field label { font-size: 0.7rem; color: var(--txt2); }
-.cf-field input, .cf-field select {
-  background: var(--bg3); border: 1px solid var(--border);
-  color: var(--txt); font-family: var(--mono); font-size: 0.92rem;
-  padding: 8px; border-radius: 4px;
-}
-.cf-field input:focus, .cf-field select:focus { outline: none; border-color: var(--accent); }
-.cf-field input[type=color] { height: 38px; padding: 3px; cursor: pointer; }
-.div-box { background: #0a1520; border: 1px solid #1a3a5a; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
-.div-box-title { font-family: var(--head); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; color: #3a8ab0; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-.div-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-.div-row label { font-size: 0.75rem; color: var(--txt2); white-space: nowrap; min-width: 28px; }
-.div-row input { flex:1; background: var(--bg); border: 1px solid #1a3a5a; color: #5bc8f0; font-family: var(--mono); font-size: 1rem; padding: 7px; border-radius: 4px; text-align: center; min-width: 0; }
-.div-row input:focus { outline: none; border-color: #3a8ab0; }
-.div-row .div-unit { font-size: 0.72rem; color: var(--txt2); white-space: nowrap; }
-.div-info { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 8px; }
-.div-info-item { background: var(--bg3); border-radius: 4px; padding: 5px 8px; text-align: center; }
-.div-info-item .di-val { font-size: 0.95rem; color: #5bc8f0; font-family: var(--mono); }
-.div-info-item .di-lbl { font-size: 0.62rem; color: var(--txt2); margin-top: 1px; }
-.cf-full { grid-column: 1/-1; }
-.cf-preview {
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 6px; padding: 10px; text-align: center; margin-top: 8px;
-}
-.cf-prev-val { font-size: 1.7rem; color: var(--ok); font-family: var(--mono); }
-.cf-prev-lbl { font-size: 0.7rem; color: var(--txt2); margin-top: 2px; }
-/* CAN RXモード時のKeypadグレーアウト */
-#view-keypad.canrx-mode #keypad-grid { opacity:0.4; pointer-events:none; }
-#view-keypad.canrx-mode::before {
-  content:'📡 CAN RXモード';
-  display:block; text-align:center; padding:6px;
-  color:#ff9800; font-size:0.78rem; font-weight:700;
-  background:rgba(255,152,0,0.08); border-radius:6px; margin-bottom:6px;
-}
-
-/* 再起動オーバーレイ */
-#restart-overlay {
-  display:none; position:fixed; inset:0; z-index:9999;
-  background:rgba(0,0,0,0.85); flex-direction:column;
-  align-items:center; justify-content:center; gap:16px;
-}
-#restart-overlay.show { display:flex; }
-.restart-msg { color:#00e5ff; font-size:1.1rem; font-weight:700; text-align:center; }
-.restart-spinner {
-  width:40px; height:40px; border:3px solid #222;
-  border-top:3px solid #00e5ff; border-radius:50%;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { to { transform:rotate(360deg); } }
-
-/* 確認ダイアログ */
-#confirm-dialog {
-  display:none; position:fixed; inset:0; z-index:9998;
-  background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
-}
-#confirm-dialog.show { display:flex; }
-.cd-box {
-  background:#0d1a24; border:1.5px solid var(--acc);
-  border-radius:12px; padding:24px; max-width:300px; width:90%; text-align:center;
-}
-.cd-title { font-size:1rem; font-weight:700; color:var(--acc); margin-bottom:10px; }
-.cd-msg   { font-size:0.82rem; color:var(--txt2); margin-bottom:18px; line-height:1.5; }
-.cd-btns  { display:flex; gap:10px; justify-content:center; }
-.cd-ok  { flex:1; padding:12px 10px; background:#00e5ff; color:#000; border:3px solid #00e5ff;
-           border-radius:8px; font-weight:800; font-size:1rem; cursor:pointer;
-           box-shadow:0 0 16px rgba(0,229,255,0.6); letter-spacing:.04em; }
-.cd-cancel { flex:1; padding:10px; background:transparent; color:var(--txt); border:1.5px solid #444; border-radius:8px; cursor:pointer; }
-
-.aux-mode-row { margin-bottom:10px; }
-.aux-mode-sel {
-  width:100%; padding:9px 10px; background:#0d1a24;
-  border:1.5px solid var(--acc); border-radius:8px;
-  color:var(--txt); font-size:0.85rem; cursor:pointer;
-  appearance:none; -webkit-appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300e5ff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
-  background-repeat:no-repeat; background-position:right 10px center;
-  padding-right:28px;
-}
-.aux-mode-sel:focus { outline:none; border-color:var(--acc); }
-.aux-panel { margin-top:10px; }
-.aux-panel-title {
-  font-size:0.75rem; font-weight:700; color:var(--acc);
-  letter-spacing:.06em; margin-bottom:8px;
-  padding-bottom:4px; border-bottom:1px solid rgba(0,229,255,0.15);
-}
-.aux-rxid-row { display:flex; flex-direction:column; gap:4px; margin-bottom:6px; }
-.aux-rxid-lbl { font-size:0.75rem; color:var(--txt2); }
-.aux-rxid-inputs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.dec-hex-pair { display:flex; align-items:center; gap:4px; flex:1; }
-.dh-dec { width:70px; }
-.dh-hex { width:52px; text-transform:uppercase; }
-.dh-sep { font-size:0.8rem; color:var(--txt2); white-space:nowrap; }
-
-/* dec/hex 2入力フィールド (rx-cfg-list内でも使用) */
-.dh-row { display:flex; align-items:center; gap:4px; }
-.dh-row .dh-dec { width:56px; }
-.dh-row .dh-hex { width:44px; }
-
-.baud-btn {
-  flex:1; min-width:56px; padding:8px 4px; border-radius:8px;
-  border:2px solid var(--acc); background:transparent;
-  color:var(--txt); font-size:0.85rem; cursor:pointer; transition:all .2s;
-}
-.baud-btn.active { background:var(--acc); color:#000; font-weight:700; }
-/* CAN RX ステータスバー (キーパッド画面上部) */
-.rx-statusbar {
-  display:flex; align-items:center; gap:8px;
-  padding:4px 8px; margin-bottom:4px;
-  background:rgba(255,152,0,0.06);
-  border:1px solid rgba(255,152,0,0.2);
-  border-radius:6px; font-size:0.72rem;
-}
-.rx-sb-label {
-  font-weight:700; color:#ff9800; letter-spacing:.08em; flex-shrink:0;
-}
-.rx-sb-ind {
-  color:#555; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-.rx-sb-ind.active {
-  color:#ff9800; font-weight:600;
-  animation: rxpulse .6s ease-out;
-}
-.rx-sb-lock {
-  font-size:0.68rem; color:#ff5722; font-weight:700; flex-shrink:0;
-}
-@keyframes rxpulse {
-  0%   { opacity:0.4; }
-  40%  { opacity:1; }
-  100% { opacity:0.9; }
-}
-/* キーパッドボタン: CAN受信で変化した場合 */
-.kp-btn.rx-changed {
-  outline: 2px solid #ff9800;
-  outline-offset: 2px;
-}
-.kp-btn.rx-changed .kb-src { color:#ff9800; font-size:0.62rem; }
-.kb-src { font-size:0.62rem; color:var(--txt2); margin-top:2px; }
-.endian-btn {
-  flex:1; padding:8px 4px; border-radius:8px; border:2px solid var(--acc);
-  background:transparent; color:var(--txt); font-size:0.78rem; cursor:pointer;
-  transition:all .2s;
-}
-.endian-btn.active { background:var(--acc); color:#000; font-weight:700; }
-.save-btn-full {
-  width: 100%; margin-top: 8px; padding: 12px; background: var(--ok);
-  border: none; border-radius: 6px; color: #000;
-  font-family: var(--head); font-weight: 700;
-  font-size: 1rem; letter-spacing: 0.1em; cursor: pointer;
-}
-
-/* log */
-#s-log {
-  height: 76px; overflow-y: auto;
-  background: #000; color: #0f0;
-  border: 1px solid #0a2a0a; border-radius: 4px;
-  padding: 5px; font-size: 0.62rem; margin-top: 10px;
-}
-</style>
-
-  <!-- PWA -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="I/O CAN">
-  <meta name="theme-color" content="#00e5ff">
-  <link rel="manifest" href="data:application/json,{%22name%22:%22I/O%20CAN%22,%22short_name%22:%22I/OCAN%22,%22theme_color%22:%2200e5ff%22,%22background_color%22:%22080d14%22,%22display%22:%22standalone%22,%22start_url%22:%22./%22}">
-  <!-- PWA icon (inline SVG → base64) -->
-  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzA2MTIyMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwMjA4MTAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImN5YW5fZ3JhZCIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMDA5OWNjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzAwZTVmZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ib3JhbmdlX2dyYWQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIwIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmNjYwMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmZmFhMDAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8ZmlsdGVyIGlkPSJnbG93X2MiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIzIiByZXN1bHQ9ImIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJiIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgICA8ZmlsdGVyIGlkPSJnbG93X28iPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyLjUiIHJlc3VsdD0iYiIvPgogICAgICA8ZmVNZXJnZT48ZmVNZXJnZU5vZGUgaW49ImIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+CiAgICA8L2ZpbHRlcj4KICAgIDxjbGlwUGF0aCBpZD0icm91bmRfY2xpcCI+CiAgICAgIDxyZWN0IHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iMzYiLz4KICAgIDwvY2xpcFBhdGg+CiAgPC9kZWZzPgoKICA8IS0tIOiDjOaZryAtLT4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjM2IiBmaWxsPSJ1cmwoI2JnKSIvPgoKICA8IS0tIOWbnui3r+Wfuuadv+OCsOODquODg+ODieODhuOCr+OCueODgeODoyAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMDgiPgogICAgPGxpbmUgeDE9IjAiIHkxPSIzMCIgeDI9IjE4MCIgeTI9IjMwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMCIgeTE9IjYwIiB4Mj0iMTgwIiB5Mj0iNjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iOTAiIHgyPSIxODAiIHkyPSI5MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjAiIHkxPSIxMjAiIHgyPSIxODAiIHkyPSIxMjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iMTUwIiB4Mj0iMTgwIiB5Mj0iMTUwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMzAiIHkxPSIwIiB4Mj0iMzAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSI2MCIgeTE9IjAiIHgyPSI2MCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjkwIiB5MT0iMCIgeDI9IjkwIiB5Mj0iMTgwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMTIwIiB5MT0iMCIgeDI9IjEyMCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjE1MCIgeTE9IjAiIHgyPSIxNTAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICA8L2c+CgogIDwhLS0g5aSW5ZGo44Oq44Oz44KwICjjgrfjgqLjg7MpIC0tPgogIDxjaXJjbGUgY3g9IjkwIiBjeT0iOTAiIHI9IjgwIiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjY3lhbl9ncmFkKSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG9wYWNpdHk9IjAuMyIvPgoKICA8IS0tIENBTuazouW9ouODqeOCpOODsyAo5LiL6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIGZpbHRlcj0idXJsKCNnbG93X2MpIiBvcGFjaXR5PSIwLjU1Ij4KICAgIDxwb2x5bGluZSBwb2ludHM9IjEwLDE0OCAxMCwxMzggMzUsMTM4IDM1LDE1OCA2MCwxNTggNjAsMTM4IDg1LDEzOCA4NSwxNTggMTEwLDE1OCAxMTAsMTM4IDEzNSwxMzggMTM1LDE1OCAxNjAsMTU4IDE2MCwxNDggMTcwLDE0OCIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPC9nPgoKICA8IS0tIOOCouODiuODreOCsOazouW9oiAo5LiK6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMjUiPgogICAgPHBhdGggZD0iTTEwLDMyIFEyNSwyMiA0MCwzMiBRNTUsNDIgNzAsMzIgUTg1LDIyIDEwMCwzMiBRMTE1LDQyIDEzMCwzMiBRMTQ1LDIyIDE3MCwzMiIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDwvZz4KCiAgPCEtLSBJL08g44OG44Kt44K544OIICjjgqrjg6zjg7PjgrgpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSI4NCIgZm9udC1zaXplPSI0NiIgZmlsbD0idXJsKCNvcmFuZ2VfZ3JhZCkiCiAgICB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwgQmxhY2ssc2Fucy1zZXJpZiIKICAgIGZvbnQtd2VpZ2h0PSI5MDAiIGxldHRlci1zcGFjaW5nPSItMSIgZmlsdGVyPSJ1cmwoI2dsb3dfbykiPkkvTzwvdGV4dD4KCiAgPCEtLSDljLrliIfjgorjg6njgqTjg7MgLS0+CiAgPGxpbmUgeDE9IjQwIiB5MT0iOTQiIHgyPSIxNDAiIHkyPSI5NCIgc3Ryb2tlPSJ1cmwoI2N5YW5fZ3JhZCkiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjYiLz4KCiAgPCEtLSBDQU4g44OG44Kt44K544OIICjjgrfjgqLjg7MpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSIxMzIiIGZvbnQtc2l6ZT0iNDYiIGZpbGw9InVybCgjY3lhbl9ncmFkKSIKICAgIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjayxzYW5zLXNlcmlmIgogICAgZm9udC13ZWlnaHQ9IjkwMCIgbGV0dGVyLXNwYWNpbmc9IjQiIGZpbHRlcj0idXJsKCNnbG93X2MpIj5DQU48L3RleHQ+CgogIDwhLS0g44Kz44O844OK44O844OJ44OD44OIICjlm57ot6/jg5Hjg4Pjg4npoqgpIC0tPgogIDxnIG9wYWNpdHk9IjAuNCI+CiAgICA8Y2lyY2xlIGN4PSIyMiIgY3k9IjIyIiByPSIzIiBmaWxsPSIjMDBlNWZmIi8+CiAgICA8Y2lyY2xlIGN4PSIxNTgiIGN5PSIyMiIgcj0iMyIgZmlsbD0iIzAwZTVmZiIvPgogICAgPGNpcmNsZSBjeD0iMjIiIGN5PSIxNTgiIHI9IjMiIGZpbGw9IiNmZjg4MDAiLz4KICAgIDxjaXJjbGUgY3g9IjE1OCIgY3k9IjE1OCIgcj0iMyIgZmlsbD0iI2ZmODgwMCIvPgogIDwvZz4KCiAgPCEtLSDmjqXntprjg6njgqTjg7MgKOOCs+ODvOODiuODvOODieODg+ODiOOBi+OCiSkgLS0+CiAgPGcgb3BhY2l0eT0iMC4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSIyMiIgeTI9IjQwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSI0MCIgeTI9IjIyIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjIyIiB4Mj0iMTU4IiB5Mj0iNDAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMjIiIHgyPSIxNDAiIHkyPSIyMiIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjEiLz4KICAgIDxsaW5lIHgxPSIyMiIgeTE9IjE1OCIgeDI9IjIyIiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMTU4IiB4Mj0iNDAiIHkyPSIxNTgiIHN0cm9rZT0iI2ZmODgwMCIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMTU4IiB4Mj0iMTU4IiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjE1OCIgeDI9IjE0MCIgeTI9IjE1OCIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEiLz4KICA8L2c+Cjwvc3ZnPg==">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23081828'/%3E%3Cstop offset='1' stop-color='%23030a12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='32' fill='url(%23g)'/%3E%3Ccircle cx='90' cy='90' r='72' fill='none' stroke='%2300e5ff' stroke-width='3' opacity='0.3'/%3E%3Ccircle cx='90' cy='90' r='55' fill='none' stroke='%2300e5ff' stroke-width='1.5' opacity='0.15'/%3E%3Ctext x='90' y='80' font-size='28' fill='%23ff8800' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='2'%3EI/O%3C/text%3E%3Ctext x='90' y='112' font-size='28' fill='%2300e5ff' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='3'%3ECAN%3C/text%3E%3Cline x1='50' y1='92' x2='130' y2='92' stroke='%2300e5ff' stroke-width='1.5' opacity='0.5'/%3E%3C/svg%3E">
-</head>
-<body>
-<div id="restart-overlay">
-  <div class="restart-spinner"></div>
-  <div class="restart-msg">デバイス再起動中...<br><span style="font-size:0.8rem;color:#888;">完了後、再接続してください</span></div>
-</div>
-<div id="confirm-dialog">
-  <div class="cd-box">
-    <div class="cd-title">⚠ ピンモード変更</div>
-    <div class="cd-msg" id="cd-msg">ピンモードを更新し、デバイスを再起動します。<br>よろしいですか？</div>
-    <div class="cd-btns">
-      <button class="cd-cancel" onclick="closeConfirm()">キャンセル</button>
-      <button class="cd-ok" id="cd-ok-btn" onclick="executePinModeSet()">✅ OK・再起動</button>
-    </div>
-  </div>
-</div>
-<div id="app">
-
-  <!-- TOPBAR -->
-  <div id="topbar">
-    <div class="t-title">I/O CAN</div>
-    <div class="t-spacer"></div>
-    <div id="ble-badge"  class="t-badge">BLE --</div>
-    <div id="can-badge"  class="t-badge">CAN --</div>
-    <div class="t-tabs">
-      <button class="t-tab active" id="tab-gauge"  onclick="showView('gauge')">📊</button>
-      <button class="t-tab"        id="tab-cfg"    onclick="showView('settings')">⚙️</button>
-    </div>
-  </div>
-
-  <!-- CONNECT OVERLAY -->
-  <div id="connect-overlay">
-    <div class="co-logo">I/O CAN</div>
-    <div class="co-sub">ATOMS3R · EXT.I/O2 · CAN CONVERTER v2</div>
-    <button id="connect-btn" onclick="startConnect()">
-      <span class="ci">📡</span>CONNECT
-    </button>
-    <div style="margin-top:20px;">
-      <span onclick="showView(currentView || 'settings')"
-        style="color:#334455;font-size:0.8rem;letter-spacing:0.1em;cursor:pointer;
-               text-decoration:underline;text-underline-offset:4px;">
-        接続せずに設定を開く
-      </span>
-    </div>
-  </div>
-
-  <!-- CONTENT -->
-  <div id="content">
-
-    <!-- ── GAUGE VIEW ────────────────── -->
-    <div id="view-gauge" class="view active">
-      <div id="gauge-grid"></div>
-    </div>
-
-    <!-- ── KEYPAD VIEW ───────────────── -->
-    <div id="view-keypad" class="view">
-      <!-- CAN RX ステータスバー -->
-      <div id="rx-statusbar" class="rx-statusbar">
-        <span class="rx-sb-label">CAN RX</span>
-        <span id="rx-sb-ind" class="rx-sb-ind">待機中</span>
-        <span id="rx-sb-lock" class="rx-sb-lock" style="display:none;">🔒CAN優先</span>
-      </div>
-      <div id="keypad-empty">
-        <div class="ke-icon">🎛</div>
-        <div class="ke-txt">AUX ピンを設定してください</div>
-        <div style="font-size:0.75rem;color:var(--txt2);">設定 → PIN MODE → AUX</div>
-      </div>
-      <div id="keypad-grid"></div>
-    </div>
-
-    <!-- ── SETTINGS VIEW ─────────────── -->
-    <div id="view-settings" class="view">
-      <div class="s-hdr">
-        <div class="s-hdr-title">SETTINGS</div>
-        <button class="s-back" id="disc-btn" onclick="disconnectBLE()"
-          style="font-size:0.85rem;color:var(--err);display:none;">切断</button>
-      </div>
-
-      <!-- ADC CAN TX ID -->
-      <div class="s-sec">
-        <div class="s-sec-title">ADC CAN TX ID</div>
-        <div class="aux-rxid-inputs">
-          <div class="dec-hex-pair">
-            <input type="number" id="adc-txid-dec" class="dh-dec" placeholder="1280" min="0" max="2047"
-              oninput="syncHex('adc-txid-dec','adc-txid-hex')">
-            <span class="dh-sep">= 0x</span>
-            <input type="text" id="adc-txid-hex" class="dh-hex" placeholder="500" maxlength="3"
-              oninput="syncDec('adc-txid-hex','adc-txid-dec')">
-          </div>
-          <button class="s-set-btn" onclick="setAdcTxId()">SET</button>
-        </div>
-        <div class="id-note">Frame1: TxID, Frame2: TxID+1 (各4ch 2byteLE)</div>
-      </div>
-
-      <!-- SW CAN TX ID -->
-      <div class="s-sec">
-        <div class="s-sec-title">SWITCH CAN TX ID</div>
-        <div class="aux-rxid-inputs">
-          <div class="dec-hex-pair">
-            <input type="number" id="sw-txid-dec" class="dh-dec" placeholder="1440" min="0" max="2047"
-              oninput="syncHex('sw-txid-dec','sw-txid-hex')">
-            <span class="dh-sep">= 0x</span>
-            <input type="text" id="sw-txid-hex" class="dh-hex" placeholder="5A0" maxlength="3"
-              oninput="syncDec('sw-txid-hex','sw-txid-dec')">
-          </div>
-          <button class="s-set-btn" onclick="setSwTxId()">SET</button>
-        </div>
-        <div class="id-note">AUX Keypadの状態を1フレームで送信 (8バイト)</div>
-      </div>
-
-      <!-- CAN BAUDRATE -->
-      <div class="s-sec">
-        <div class="s-sec-title">CAN ボーレート</div>
-        <div class="id-row" style="gap:6px;flex-wrap:wrap;">
-          <button class="baud-btn" id="baud-125" onclick="setBaud(125000)">125k</button>
-          <button class="baud-btn" id="baud-250" onclick="setBaud(250000)">250k</button>
-          <button class="baud-btn" id="baud-500" onclick="setBaud(500000)">500k</button>
-          <button class="baud-btn active" id="baud-1000" onclick="setBaud(1000000)">1M</button>
-        </div>
-        <div class="id-note">変更後CAN自動再起動。デフォルト: 1Mbps</div>
-      </div>
-
-      <!-- ADC ENDIAN -->
-      <div class="s-sec">
-        <div class="s-sec-title">ADC CAN エンディアン</div>
-        <div class="aux-mode-row">
-          <select id="endian-sel" class="aux-mode-sel" onchange="setEndian(parseInt(this.value))">
-            <option value="0">🔢 リトルエンディアン (LE) ― バイト順: LSB → MSB</option>
-            <option value="1">🔡 ビッグエンディアン (BE) ― バイト順: MSB → LSB</option>
-          </select>
-        </div>
-        <div class="id-note">LE: [val&0xFF, val>>8]　BE: [val>>8, val&0xFF]</div>
-      </div>
-
-
-      <!-- PIN MODES -->
-      <div class="s-sec">
-        <div class="s-sec-title">PIN MODE</div>
-        <div class="pin-grid" id="pin-grid"></div>
-        <div class="id-note" style="margin-top:6px;">タップで INPUT(ADC) / AUX(スイッチ) 切替 → SETで確定・再起動</div>
-        <button class="save-btn-full" onclick="confirmPinModeSet()" style="margin-top:8px;">📡 ピンモードSET &amp; 再起動</button>
-      </div>
-
-      <!-- AUX CTRL MODE + 条件パネル -->
-      <div class="s-sec">
-        <div class="s-sec-title">AUX 制御モード</div>
-        <div class="aux-mode-row">
-          <select id="aux-mode-sel" class="aux-mode-sel" onchange="setAuxMode(parseInt(this.value))">
-            <option value="0">📱 Keypad モード (スマホBLE操作)</option>
-            <option value="1">📡 CAN RX モード (外部CAN信号制御)</option>
-          </select>
-        </div>
-
-        <!-- Keypadモード: ボタン設定パネル -->
-        <div id="aux-panel-keypad" class="aux-panel">
-          <div class="aux-panel-title">📱 Keypad ボタン設定</div>
-          <div class="kp-cfg-list" id="kp-cfg-list">
-            <div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>
-          </div>
-        </div>
-
-        <!-- CAN RXモード: 受信ID＋ON/OFF値設定パネル -->
-        <div id="aux-panel-canrx" class="aux-panel" style="display:none;">
-          <div class="aux-panel-title">📡 CAN RX 受信設定</div>
-          <div class="aux-rxid-row">
-            <label class="aux-rxid-lbl">受信 CAN ID</label>
-            <div class="aux-rxid-inputs">
-              <div class="dec-hex-pair">
-                <input type="number" id="rx-canid-dec" class="dh-dec" placeholder="1536" min="0" max="2047"
-                  oninput="syncHex('rx-canid-dec','rx-canid-hex')">
-                <span class="dh-sep">= 0x</span>
-                <input type="text"   id="rx-canid-hex" class="dh-hex" placeholder="600" maxlength="3"
-                  oninput="syncDec('rx-canid-hex','rx-canid-dec')">
-              </div>
-              <button class="s-set-btn" onclick="setRxCanIdNew()">SET</button>
-            </div>
-          </div>
-          <div class="id-note" style="margin-bottom:6px;">EMTRONが送信するCAN ID (AUXピンのみ有効)</div>
-          <div class="kp-cfg-list" id="rx-cfg-list"></div>
-        </div>
-      </div>
-
-      <!-- COEFF -->
-      <div class="s-sec">
-        <div class="s-sec-title">ADC 表示係数</div>
-        <div class="coeff-ch-bar" id="coeff-ch-bar"></div>
-
-        <!-- 分圧抵抗補正 -->
-        <div class="div-box">
-          <div class="div-box-title">⚡ 分圧抵抗補正 <span style="font-size:0.68rem;color:var(--txt2);font-weight:400;">(未使用時は0)</span></div>
-          <div class="div-row">
-            <label>R1</label>
-            <input type="number" id="cf-r1" min="0" step="100" value="0" placeholder="0" oninput="updateDivInfo()">
-            <span class="div-unit">Ω</span>
-          </div>
-          <div class="div-row">
-            <label>R2</label>
-            <input type="number" id="cf-r2" min="0" step="100" value="0" placeholder="0" oninput="updateDivInfo()">
-            <span class="div-unit">Ω</span>
-          </div>
-          <div class="div-info" id="div-info" style="display:none;">
-            <div class="div-info-item">
-              <div class="di-val" id="div-ratio">--</div>
-              <div class="di-lbl">補正倍率</div>
-            </div>
-            <div class="div-info-item">
-              <div class="di-val" id="div-adc-max">--</div>
-              <div class="di-lbl">ADCピン最大(V)</div>
-            </div>
-            <div class="div-info-item">
-              <div class="di-val" id="div-src-max">--</div>
-              <div class="di-lbl">センサー最大(V)</div>
-            </div>
-            <div class="div-info-item">
-              <div class="di-val" id="div-safe">--</div>
-              <div class="di-lbl">3.3V以内</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ユーザー係数 (分圧補正後の値に適用) -->
-        <div class="coeff-form">
-          <div class="cf-field"><label>ラベル</label><input type="text"   id="cf-lbl" placeholder="CH 0"></div>
-          <div class="cf-field"><label>単位</label>  <input type="text"   id="cf-unit" placeholder="V"></div>
-          <div class="cf-field"><label>乗数 ×</label><input type="number" id="cf-mul" step="0.0001" value="1"></div>
-          <div class="cf-field"><label>+ オフセット</label><input type="number" id="cf-add" step="0.01" value="0"></div>
-          <div class="cf-field"><label>MIN</label>   <input type="number" id="cf-min" value="0"></div>
-          <div class="cf-field"><label>MAX</label>   <input type="number" id="cf-max" value="5"></div>
-          <div class="cf-field"><label>小数点</label>
-            <select id="cf-dec"><option value="0">0</option><option value="1">1</option>
-              <option value="2" selected>2</option><option value="3">3</option></select>
-          </div>
-          <div class="cf-field"><label>カラー</label><input type="color" id="cf-color" value="#00e5ff"></div>
-        </div>
-
-        <div class="cf-preview">
-          <div class="cf-prev-val" id="cf-prev-val">--</div>
-          <div class="cf-prev-lbl" id="cf-prev-lbl">プレビュー</div>
-          <div id="cf-prev-chain" style="font-size:0.65rem;color:var(--txt2);margin-top:4px;"></div>
-        </div>
-        <button class="save-btn-full" onclick="saveCoeff()">💾 保存</button>
-      </div>
-
-      <!-- LOG -->
-      <div class="s-sec">
-        <div class="s-sec-title">通信ログ</div>
-        <div id="s-log"></div>
-      </div>
-    </div>
-
-  </div><!-- /content -->
-</div><!-- /app -->
-
-<script>
-// ════════════════════════════════════════════
-// CONSTANTS & STATE
-// ════════════════════════════════════════════
-const NUM_CH = 8;
-const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify
-const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write
-
-let bleDevice, bleServer, txChar, rxChar;
-let isConnected = false;
-
-// Device state (synced from NVS on connect)
-let adcRaw   = Array(NUM_CH).fill(0);
-let swVals   = Array(NUM_CH).fill(0);    // current CAN byte value per pin
-let swSrc    = Array(NUM_CH).fill('');   // 'ble' or 'can' - 最終変化元
-let rxIndTimer = null;
-let pinModes = JSON.parse(localStorage.getItem("ana_pinModes")  || "null") || Array(NUM_CH).fill(1);
-let swOnVals = JSON.parse(localStorage.getItem("ana_swOnVals")  || "null") || Array(NUM_CH).fill(1);
-let swOffVals= JSON.parse(localStorage.getItem("ana_swOffVals") || "null") || Array(NUM_CH).fill(0);
-let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
-let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
-let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
-let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
-let canBaud  = parseInt(localStorage.getItem("ana_canBaud")||"1000000");
-let rxOnVals    = JSON.parse(localStorage.getItem("ana_rxOnVals")  || "null") || Array(NUM_CH).fill(1);
-let rxOffVals   = JSON.parse(localStorage.getItem("ana_rxOffVals") || "null") || Array(NUM_CH).fill(0);
-let auxCtrlMode = parseInt(localStorage.getItem("ana_auxCtrlMode") || "0"); // 0=Keypad 1=CAN RX
-let pendingPinModes = null;  // 保留中のピンモード変更
-
-// Button metadata (label/mode per pin, stored locally)
-function loadBtnMeta() {
-  const d = localStorage.getItem("ana_btnMeta");
-  if (d) try { return JSON.parse(d); } catch(e) {}
-  return Array.from({length:NUM_CH}, (_,i) => ({
-    label: `SW${i}`,
-    mode:  "toggle"  // toggle | momentary
-  }));
-}
-let btnMeta = loadBtnMeta();
-function saveBtnMeta() { localStorage.setItem("ana_btnMeta", JSON.stringify(btnMeta)); }
-
-// Coefficient settings (INPUT only)
-function defaultCoeff(i) {
-  return {
-    label: `CH${i}`, unit: "V",
-    mul: 1.0, add: 0, min: 0, max: 5, dec: 2,
-    color: ["#00e5ff","#00ff88","#ff6b00","#ffcc00","#ff3355","#cc88ff","#88ddff","#ffaa44"][i],
-    r1: 0, r2: 0   // 分圧抵抗 Ω (0=未使用)
-  };
-}
-
-// 計算チェーン:  raw → ×(3.3/4095) → ×divCorr → ×mul → +add
-function calcDisplayVal(ch, raw) {
-  const c = coeffs[ch];
-  const adcVolt  = raw * (3.3 / 4095);
-  const r1 = parseFloat(c.r1) || 0;
-  const r2 = parseFloat(c.r2) || 0;
-  const divCorr  = (r1 > 0 && r2 > 0) ? (r1 + r2) / r2 : 1.0;
-  return adcVolt * divCorr * c.mul + c.add;
-}
-
-function getDivCorr(ch) {
-  const r1 = parseFloat(coeffs[ch].r1) || 0;
-  const r2 = parseFloat(coeffs[ch].r2) || 0;
-  return (r1 > 0 && r2 > 0) ? (r1 + r2) / r2 : 1.0;
-}
-let coeffs = (() => {
-  try {
-    const s = localStorage.getItem("ana_coeffs");
-    const a = s ? JSON.parse(s) : null;
-    if (a && a.length === NUM_CH) return a;
-  } catch(e) {}
-  return Array.from({length:NUM_CH}, (_,i) => defaultCoeff(i));
-})();
-function saveCoeffsLocal() { localStorage.setItem("ana_coeffs", JSON.stringify(coeffs)); }
-
-let currentCoeffCh = 0;
-let currentView = "gauge";
-
-// ════════════════════════════════════════════
-// BLE
-// ════════════════════════════════════════════
-async function startConnect() {
-  // ① Web Bluetooth 対応チェック
-  if (!navigator.bluetooth) {
-    alert(
-      "⚠️ Web Bluetooth が使えません\n\n" +
-      "必要な環境:\n" +
-      "・Chrome (PC / Android)  ← 推奨\n" +
-      "・Safari iOS 16+\n\n" +
-      "NG な環境:\n" +
-      "・Firefox (非対応)\n" +
-      "・file:// 直接開き (HTTPSが必要)\n\n" +
-      "→ ChromeでHTTPS URLから開いてください"
-    );
-    return;
-  }
-  // ② HTTPS / localhost チェック
-  if (location.protocol === "file:") {
-    alert(
-      "⚠️ file:// では Web Bluetooth は動作しません\n\n" +
-      "解決方法:\n" +
-      "① HTTPS サーバー経由でアクセス\n" +
-      "② ATOMS3R の Wi-Fi AP + Webサーバー\n" +
-      "③ ngrok 等でHTTPS化"
-    );
-    return;
-  }
-  log("🔍 デバイス検索中... (M5S3R_AnaCAN)");
-  try {
-    log("スキャン中...");
-    bleDevice = await navigator.bluetooth.requestDevice({
-      filters: [{ name: "M5S3R_AnaCAN" }],
-      optionalServices: [SERVICE_UUID]
-    });
-    bleDevice.addEventListener("gattserverdisconnected", onDisconnected);
-    bleServer = await bleDevice.gatt.connect();
-    const svc = await bleServer.getPrimaryService(SERVICE_UUID);
-    txChar = await svc.getCharacteristic(CHAR_TX_UUID);
-    rxChar = await svc.getCharacteristic(CHAR_RX_UUID);
-    await txChar.startNotifications();
-    txChar.addEventListener("characteristicvaluechanged", onNotify);
-    setConnected(true);
-    document.getElementById("connect-overlay").style.display = "none";
-    log("接続: " + bleDevice.name);
-    await send("REQUEST_STATE");
-  } catch(e) {
-    const msg = e.message || String(e);
-    if (msg.includes("User cancelled") || msg.includes("cancelled")) {
-      log("ℹ️ キャンセルされました");
-    } else if (msg.includes("not found") || msg.includes("no devices")) {
-      log("❌ デバイスが見つかりません");
-      log("   → ATOMS3RのLEDが点滅しているか確認");
-      log("   → main.py が起動しているか確認");
-      log("   → スマホのBluetooth ON を確認");
-    } else {
-      log("❌ 接続エラー: " + msg);
-    }
-  }
-}
-
-function onDisconnected() {
-  setConnected(false);
-  // settings ビューにいる場合はオーバーレイを出さない (設定は常にアクセス可)
-  if (currentView !== "settings") {
-    document.getElementById("connect-overlay").style.display = "flex";
-  }
-  log("切断");
-}
-
-async function disconnectBLE() {
-  if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
-}
-
-function setConnected(v) {
-  isConnected = v;
-  const bb = document.getElementById("ble-badge");
-  bb.textContent = v ? "BLE ON" : "BLE --";
-  bb.className = "t-badge" + (v ? " ble" : "");
-  document.getElementById("disc-btn").style.display = v ? "block" : "none";
-}
-
-async function send(cmd) {
-  if (!rxChar) { log("未接続"); return; }
-  try { await rxChar.writeValue(new TextEncoder().encode(cmd)); }
-  catch(e) { log("送信エラー: "+e); }
-}
-
-const dec = new TextDecoder();
-function onNotify(ev) {
-  dec.decode(ev.target.value).trim().split('\n').forEach(l => {
-    l = l.trim(); if (!l) return;
-    parseMsg(l);
-  });
-}
-
-function parseMsg(msg) {
-  // CFG1パケット: 設定値一括受信
-  if (msg.startsWith("CFG1=")) {
-    msg.slice(5).split("|").forEach(part => {
-      if (part.startsWith("LOG="))      log("📡 " + part.slice(4));
-      else if (part.startsWith("TXID="))    { adcTxId = part.slice(7).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_adcTxId",adcTxId); }
-      else if (part.startsWith("SW_TXID=")) { swTxId  = part.slice(10).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_swTxId",swTxId); }
-      else if (part.startsWith("RX_ID="))   { rxCanId = part.slice(9).replace(/^0x/i,'').toUpperCase(); localStorage.setItem("ana_rxCanId",rxCanId); }
-      else if (part.startsWith("ENDIAN="))  { canEndian = parseInt(part.slice(7)); localStorage.setItem("ana_canEndian",canEndian); updateEndianUI(); }
-      else if (part.startsWith("AUX_MODE=")){ auxCtrlMode = parseInt(part.slice(9)); localStorage.setItem("ana_auxCtrlMode",auxCtrlMode); updateAuxModeUI(); }
-      else if (part.startsWith("BAUD="))    { canBaud = parseInt(part.slice(5)); localStorage.setItem("ana_canBaud",canBaud); updateBaudUI(); }
-    }); return;
-  }
-  // CFG2パケット: ピン設定一括受信
-  if (msg.startsWith("CFG2=")) {
-    msg.slice(5).split("|").forEach(part => {
-      if (part.startsWith("PIN_MODES=")) {
-        part.slice(10).split(',').forEach((v,i) => { if(i<NUM_CH) pinModes[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_pinModes", JSON.stringify(pinModes)); applyPinModesUI();
-      } else if (part.startsWith("SW_ON=")) {
-        part.slice(6).split(',').forEach((v,i) => { if(i<NUM_CH) swOnVals[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
-      } else if (part.startsWith("SW_OFF=")) {
-        part.slice(7).split(',').forEach((v,i) => { if(i<NUM_CH) swOffVals[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_swOffVals", JSON.stringify(swOffVals));
-      } else if (part.startsWith("RX_ON=")) {
-        part.slice(6).split(',').forEach((v,i) => { if(i<NUM_CH) rxOnVals[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_rxOnVals", JSON.stringify(rxOnVals));
-      } else if (part.startsWith("RX_OFF=")) {
-        part.slice(7).split(',').forEach((v,i) => { if(i<NUM_CH) rxOffVals[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_rxOffVals", JSON.stringify(rxOffVals));
-      } else if (part.startsWith("SW_VALS=")) {
-        part.slice(8).split(',').forEach((v,i) => { if(i<NUM_CH) swVals[i]=parseInt(v)||0; });
-        renderKeypad();
-      }
-    }); return;
-  }
-
-  // 複合パケット "AVALS=...|SW=...|ST=..." を分解して個別処理
-  if (msg.includes("|SW=")) {
-    msg.split("|").forEach(part => {
-      if (part.startsWith("AVALS="))
-        part.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) adcRaw[i] = parseInt(v)||0; });
-      else if (part.startsWith("SW="))
-        part.slice(3).split(',').forEach((v,i) => { if (i<NUM_CH) swVals[i] = parseInt(v)||0; });
-      else if (part.startsWith("ST=")) {
-        const ok = part.slice(3) === "1";
-        const b = document.getElementById("can-badge");
-        if (b) { b.textContent = ok ? "CAN OK" : "CAN ERR"; b.className = "t-badge " + (ok?"ok":"err"); }
-      }
-    });
-    renderAllGauges(); updateCoeffPreview(); renderKeypad(); return;
-  }
-  if (msg.startsWith("AVALS=")) {
-    msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) adcRaw[i] = parseInt(v)||0; });
-    renderAllGauges(); updateCoeffPreview(); return;
-  }
-  if (msg.startsWith("SW_VALS=")) {
-    msg.slice(8).split(',').forEach((v,i) => { if (i<NUM_CH) swVals[i] = parseInt(v)||0; });
-    updateAllAuxBtns(); renderKeypad(); return;
-  }
-  if (msg.startsWith("PIN_MODES=")) {
-    msg.slice(10).split(',').forEach((v,i) => { if (i<NUM_CH) pinModes[i] = parseInt(v)||0; });
-    localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
-    applyPinModesUI(); return;
-  }
-  if (msg.startsWith("SW_ON=")) {
-    msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) swOnVals[i] = parseInt(v)||0; });
-    localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
-    return;
-  }
-  if (msg.startsWith("SW_OFF=")) {
-    msg.slice(7).split(',').forEach((v,i) => { if (i<NUM_CH) swOffVals[i] = parseInt(v)||0; });
-    localStorage.setItem("ana_swOffVals", JSON.stringify(swOffVals));
-    renderKeypadCfgList(); return;
-  }
-  if (msg.startsWith("TXID=")) {
-    adcTxId = msg.slice(5).replace(/0x/i,'').toUpperCase();
-    localStorage.setItem("ana_adcTxId", adcTxId);
-    const d=document.getElementById('adc-txid-dec'); if(d) d.value=parseInt(adcTxId,16);
-    const h=document.getElementById('adc-txid-hex'); if(h) h.value=adcTxId;
-    const _a=document.getElementById("adc-txid-dec"); if(_a) _a.value=parseInt(adcTxId,16);
-    const _b=document.getElementById("adc-txid-hex"); if(_b) _b.value=adcTxId; return;
-  }
-  if (msg.startsWith("SW_TXID=")) {
-    swTxId = msg.slice(8).replace(/0x/i,'').toUpperCase();
-    localStorage.setItem("ana_swTxId", swTxId);
-    const d=document.getElementById('sw-txid-dec'); if(d) d.value=parseInt(swTxId,16);
-    const h=document.getElementById('sw-txid-hex'); if(h) h.value=swTxId;
-    const _c=document.getElementById("sw-txid-dec"); if(_c) _c.value=parseInt(swTxId,16);
-    const _d=document.getElementById("sw-txid-hex"); if(_d) _d.value=swTxId; return;
-  }
-  if (msg.startsWith("STATUS=")) {
-    const ok = msg === "STATUS=CAN_OK";
-    const b = document.getElementById("can-badge");
-    b.textContent = ok ? "CAN OK" : "CAN ERR";
-    b.className = "t-badge " + (ok ? "ok" : "err"); return;
-  }
-  if (msg.startsWith("SW_CFG_OK=")) {
-    const p = msg.slice(10).split(',');
-    const pin = parseInt(p[0]);
-    swOnVals[pin]  = parseInt(p[1])||0;
-    swOffVals[pin] = parseInt(p[2])||0;
-    renderKeypad(); return;
-  }
-  if (msg.startsWith("BAUD=")) {
-    canBaud = parseInt(msg.slice(5));
-    localStorage.setItem("ana_canBaud", canBaud);
-    updateBaudUI(); return;
-  }
-  if (msg.startsWith("RX_ID=")) {
-    rxCanId = msg.slice(6).replace(/0x/i,'').toUpperCase();
-    localStorage.setItem("ana_rxCanId", rxCanId);
-    const _e=document.getElementById('rx-canid-dec'); if(_e) _e.value=parseInt(rxCanId,16);
-    const _f=document.getElementById('rx-canid-hex'); if(_f) _f.value=rxCanId.toUpperCase(); return;
-  }
-  if (msg.startsWith("ENDIAN=")) {
-    canEndian = parseInt(msg.slice(7));
-    localStorage.setItem("ana_canEndian", canEndian);
-    updateEndianUI(); return;
-  }
-  if (msg.startsWith("RX_ON=")) {
-    msg.slice(6).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOnVals[i]=parseInt(v); });
-    localStorage.setItem("ana_rxOnVals", JSON.stringify(rxOnVals));
-    renderRxCfgList(); return;
-  }
-  if (msg.startsWith("RX_OFF=")) {
-    msg.slice(7).split(",").forEach((v,i)=>{ if(i<NUM_CH) rxOffVals[i]=parseInt(v); });
-    localStorage.setItem("ana_rxOffVals", JSON.stringify(rxOffVals));
-    renderRxCfgList(); return;
-  }
-  if (msg.startsWith("AUX_MODE=")) {
-    auxCtrlMode = parseInt(msg.slice(9));
-    localStorage.setItem("ana_auxCtrlMode", auxCtrlMode);
-    updateAuxModeUI(); return;
-  }
-  if (msg === "RESTARTING") {
-    log("🔄 デバイス再起動中...");
-    showRestartingOverlay(); return;
-  }
-  if (msg === "SW_LOCK=CAN" || msg === "SW_LOCK=CANRX") {
-    const lock = document.getElementById('rx-sb-lock');
-    if (lock) { lock.style.display='inline'; setTimeout(()=>lock.style.display='none',2000); }
-    log("⚠ CAN RXモード: Keypad無効"); return;
-  }
-  if (msg.startsWith("RX_ACT=")) {
-    // CAN RXによるAUX変化通知
-    const vals = msg.slice(7).split(',').map(v=>parseInt(v)||0);
-    vals.forEach((v,i) => { if(i<NUM_CH) swSrc[i] = 'can'; });
-    showRxIndicator(vals);
-    return;
-  }
-  log("← " + msg);
-}
-
-// ════════════════════════════════════════════
-// VIEW NAVIGATION
-// ════════════════════════════════════════════
-function showView(v) {
-  document.getElementById("connect-overlay").style.display = "none";
-  currentView = v;
-  ["gauge","keypad","settings"].forEach(n => {
-    const vEl = document.getElementById("view-"+n);
-    if (vEl) vEl.classList.toggle("active", n===v);
-    const tEl = document.getElementById("tab-"+(n==="settings"?"cfg":n));
-    if (tEl) tEl.classList.toggle("active", n===v);
-  });
-  if (v === "gauge") {
-    // settingsから戻るとCanvasサイズが0になるため再計算
-    requestAnimationFrame(() => { sizeCanvases(); });
-  }
-  if (v === "settings") {
-    updateBaudUI();
-    updateEndianUI();
-    updateAuxModeUI();
-    // ADC TX ID
-    const adcDecEl = document.getElementById('adc-txid-dec');
-    const adcHexEl = document.getElementById('adc-txid-hex');
-    if (adcDecEl) adcDecEl.value = parseInt(adcTxId,16);
-    if (adcHexEl) adcHexEl.value = adcTxId.toUpperCase();
-    // SW TX ID
-    const swDecEl = document.getElementById('sw-txid-dec');
-    const swHexEl = document.getElementById('sw-txid-hex');
-    if (swDecEl) swDecEl.value = parseInt(swTxId,16);
-    if (swHexEl) swHexEl.value = swTxId.toUpperCase();
-    renderPinGrid();
-    renderCoeffChBar();
-    loadCoeffForm();
-  }
-}
-
-// ════════════════════════════════════════════
-// SETTINGS ACTIONS
-// ════════════════════════════════════════════
-function showRxIndicator(vals) {
-  const ind  = document.getElementById('rx-sb-ind');
-  const lock = document.getElementById('rx-sb-lock');
-  if (!ind) return;
-  const onPins  = vals.map((v,i)=>pinModes[i]===0 && v===swOnVals[i]  ? 'P'+i+':ON'  : null).filter(Boolean);
-  const offPins = vals.map((v,i)=>pinModes[i]===0 && v===swOffVals[i] ? 'P'+i+':OFF' : null).filter(Boolean);
-  const parts = [...onPins, ...offPins];
-  const txt = parts.length ? parts.join('  ') : 'ACT';
-  ind.textContent = txt;
-  ind.classList.remove('active');
-  void ind.offsetWidth;
-  ind.classList.add('active');
-  if (lock) lock.style.display = 'inline';
-  if (rxIndTimer) clearTimeout(rxIndTimer);
-  rxIndTimer = setTimeout(() => {
-    ind.classList.remove('active');
-    ind.textContent = '待機中';
-    if (lock) lock.style.display = 'none';
-  }, 3000);
-  log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
-}
-
-// ── ピンモード SET & 再起動 ──
-function confirmPinModeSet() {
-  const changes = [];
-  for (let i=0; i<NUM_CH; i++) {
-    changes.push('P'+i+':'+(pinModes[i]===1?'INPUT':'AUX'));
-  }
-  document.getElementById('cd-msg').innerHTML =
-    'ピンモードを更新し、デバイスを再起動します。<br>' +
-    '<span style="font-size:0.75rem;color:#aaa;">' + changes.join('  ') + '</span><br><br>よろしいですか？';
-  document.getElementById('confirm-dialog').classList.add('show');
-}
-function closeConfirm() {
-  document.getElementById('confirm-dialog').classList.remove('show');
-}
-function executePinModeSet() {
-  closeConfirm();
-  const modeStr = pinModes.join(',');
-  send('SET_ALL_PINS=' + modeStr);
-  log('→ SET_ALL_PINS=' + modeStr + ' (再起動)');
-  localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
-  setTimeout(showRestartingOverlay, 200);
-}
-function showRestartingOverlay() {
-  document.getElementById('restart-overlay').classList.add('show');
-  // 10秒後に自動で閉じる(再接続を促す)
-  setTimeout(() => {
-    document.getElementById('restart-overlay').classList.remove('show');
-  }, 10000);
-}
-
-// ── AUX制御モード ──
-function setAuxMode(v) {
-  auxCtrlMode = v;
-  localStorage.setItem('ana_auxCtrlMode', v);
-  updateAuxModeUI();
-  send('SET_AUX_MODE=' + v);
-  log('→ AUX MODE: ' + (v===0 ? 'Keypad' : 'CAN RX'));
-}
-function updateAuxModeUI() {
-  // プルダウン同期
-  const sel = document.getElementById('aux-mode-sel');
-  if (sel) sel.value = String(auxCtrlMode);
-  // パネル切替
-  const pkp = document.getElementById('aux-panel-keypad');
-  const pcr = document.getElementById('aux-panel-canrx');
-  if (pkp) pkp.style.display = auxCtrlMode===0 ? '' : 'none';
-  if (pcr) pcr.style.display = auxCtrlMode===1 ? '' : 'none';
-  // Keypadビューのグレーアウト
-  const kpView = document.getElementById('view-keypad');
-  if (kpView) kpView.classList.toggle('canrx-mode', auxCtrlMode===1);
-  // RX設定パネル更新
-  if (auxCtrlMode===1) {
-    const decEl = document.getElementById('rx-canid-dec');
-    const hexEl = document.getElementById('rx-canid-hex');
-    if (decEl) decEl.value = parseInt(rxCanId, 16);
-    if (hexEl) hexEl.value = rxCanId.toUpperCase();
-    renderRxCfgList();
-  } else {
-    renderKeypadCfgList();
-  }
-}
-
-// ── Dec/Hex 双方向同期ヘルパー ──
-function syncHex(decId, hexId) {
-  const el = document.getElementById(decId);
-  const hexEl = document.getElementById(hexId);
-  if (!el || !hexEl) return;
-  const v = parseInt(el.value);
-  if (isNaN(v) || v<0) return;
-  const maxLen = parseInt(hexEl.maxLength) || 3;
-  hexEl.value = v.toString(16).toUpperCase().padStart(maxLen,'0');
-}
-function syncDec(hexId, decId) {
-  const v = parseInt(document.getElementById(hexId).value, 16);
-  if (!isNaN(v)) document.getElementById(decId).value = v;
-}
-function setRxCanIdNew() {
-  const dec = parseInt(document.getElementById('rx-canid-dec').value);
-  if (isNaN(dec) || dec<0 || dec>2047) return;
-  const hexStr = dec.toString(16).toUpperCase().padStart(3,'0');
-  rxCanId = hexStr;
-  localStorage.setItem("ana_rxCanId", rxCanId);
-  document.getElementById('rx-canid-hex').value = hexStr;
-  send("SET_RX_ID=0x"+hexStr); log("→ SET_RX_ID=0x"+hexStr);
-}
-
-function setBaud(v) {
-  canBaud = v;
-  localStorage.setItem("ana_canBaud", v);
-  updateBaudUI();
-  send("SET_BAUD="+v); log("→ SET_BAUD="+v);
-}
-function updateBaudUI() {
-  [125000,250000,500000,1000000].forEach(b => {
-    const el = document.getElementById("baud-"+(b>=1000000?"1000":b/1000));
-    if (el) el.classList.toggle("active", canBaud===b);
-  });
-}
-function setEndian(v) {
-  canEndian = v;
-  localStorage.setItem("ana_canEndian", v);
-  updateEndianUI();
-  send("SET_ENDIAN="+v); log("→ SET_ENDIAN="+(v===0?"LE":"BE"));
-}
-function updateEndianUI() {
-  const sel = document.getElementById("endian-sel");
-  if (sel) sel.value = String(canEndian);
-}
-// setRxCanId: 旧関数(後方互換用、setRxCanIdNew に統合済み)
-function setRxCanId() { setRxCanIdNew(); }
-function renderRxCfgList() {
-  const list = document.getElementById("rx-cfg-list"); if (!list) return;
-  list.innerHTML = "";
-  const auxPins = [];
-  for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
-  if (!auxPins.length) {
-    list.innerHTML = '<div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>'; return;
-  }
-  auxPins.forEach(pin => {
-    const row = document.createElement("div");
-    row.className = "kp-cfg-row";
-    const onD=rxOnVals[pin], offD=rxOffVals[pin];
-    const onH=onD.toString(16).toUpperCase().padStart(2,'0');
-    const offH=offD.toString(16).toUpperCase().padStart(2,'0');
-    row.innerHTML = `
-      <div class="kr-head"><span class="kr-pin">PIN ${pin}</span></div>
-      <div class="kr-fields">
-        <div>
-          <div class="kr-label">RX ON値</div>
-          <div class="dh-row">
-            <input class="dh-dec" type="number" id="rx-on-d-${pin}" value="${onD}" min="0" max="255"
-              oninput="syncHex('rx-on-d-${pin}','rx-on-h-${pin}')">
-            <span class="dh-sep">0x</span>
-            <input class="dh-hex" type="text" id="rx-on-h-${pin}" value="${onH}" maxlength="2"
-              oninput="syncDec('rx-on-h-${pin}','rx-on-d-${pin}')">
-          </div>
-        </div>
-        <div>
-          <div class="kr-label">RX OFF値</div>
-          <div class="dh-row">
-            <input class="dh-dec" type="number" id="rx-off-d-${pin}" value="${offD}" min="0" max="255"
-              oninput="syncHex('rx-off-d-${pin}','rx-off-h-${pin}')">
-            <span class="dh-sep">0x</span>
-            <input class="dh-hex" type="text" id="rx-off-h-${pin}" value="${offH}" maxlength="2"
-              oninput="syncDec('rx-off-h-${pin}','rx-off-d-${pin}')">
-          </div>
-        </div>
-        <button class="s-set-btn" onclick="setRxVal(${pin})">SET</button>
-      </div>`;
-    list.appendChild(row);
-  });
-}
-function setRxVal(pin) {
-  const on  = parseInt(document.getElementById("rx-on-d-"+pin).value)  || 0;
-  const off = parseInt(document.getElementById("rx-off-d-"+pin).value) || 0;
-  rxOnVals[pin] = on; rxOffVals[pin] = off;
-  send("RX_ON="+pin+","+on);   log("→ RX_ON="+pin+","+on);
-  send("RX_OFF="+pin+","+off); log("→ RX_OFF="+pin+","+off);
-}
-
-function setAdcTxId() {
-  const dec = parseInt(document.getElementById('adc-txid-dec').value);
-  if (isNaN(dec) || dec<0 || dec>2047) return;
-  const h = dec.toString(16).toUpperCase().padStart(3,'0');
-  document.getElementById('adc-txid-hex').value = h;
-  adcTxId = h; localStorage.setItem("ana_adcTxId", h);
-  send("SET_TXID=0x"+h); log("→ SET_TXID=0x"+h);
-}
-function setSwTxId() {
-  const dec = parseInt(document.getElementById('sw-txid-dec').value);
-  if (isNaN(dec) || dec>2047) return;
-  const h = dec.toString(16).toUpperCase().padStart(3,'0');
-  document.getElementById('sw-txid-hex').value = h;
-  swTxId = h; localStorage.setItem("ana_swTxId", h);
-  send("SW_TXID=0x"+h); log("→ SW_TXID=0x"+h);
-}
-
-function renderPinGrid() {
-  const g = document.getElementById("pin-grid"); g.innerHTML = "";
-  for (let i=0; i<NUM_CH; i++) {
-    const d = document.createElement("div");
-    d.className = "pin-card " + (pinModes[i]===1 ? "input-mode" : "aux-mode");
-    d.innerHTML = `<span class="pc-num">P${i}</span>
-                   <span class="pc-mode">${pinModes[i]===1?"INPUT":"AUX"}</span>`;
-    d.onclick = () => togglePin(i);
-    g.appendChild(d);
-  }
-}
-
-function togglePin(i) {
-  pinModes[i] = pinModes[i]===1 ? 0 : 1;
-  applyPinModesUI();
-  // ※ SET & 再起動ボタンで確定
-}
-
-function applyPinModesUI() {
-  buildGaugeGrid();
-  requestAnimationFrame(() => { sizeCanvases(); updateAllAuxBtns(); });
-  renderPinGrid();
-  renderCoeffChBar();
-  // 現在のAUXモードに合わせて設定リストを即時更新
-  if (auxCtrlMode === 1) renderRxCfgList();
-  else renderKeypadCfgList();
-}
-
-// ════════════════════════════════════════════
-// KEYPAD CONFIG (AUX pins)
-// ════════════════════════════════════════════
-function renderKeypadCfgList() {
-  const list = document.getElementById("kp-cfg-list"); list.innerHTML = "";
-  const auxPins = [];
-  for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
-
-  if (auxPins.length === 0) {
-    list.innerHTML = '<div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>';
-    return;
-  }
-
-  auxPins.forEach(pin => {
-    const meta = btnMeta[pin];
-    const row = document.createElement("div");
-    row.className = "kp-cfg-row";
-    row.innerHTML = `
-      <div class="kr-head">
-        <span class="kr-pin">PIN ${pin}</span>
-        <div class="kr-mode-sw">
-          <button class="kr-mode-opt ${meta.mode==='toggle'?'sel':''}" onclick="setBtnMode(${pin},'toggle')">Toggle</button>
-          <button class="kr-mode-opt ${meta.mode==='momentary'?'sel':''}" onclick="setBtnMode(${pin},'momentary')">Pulse</button>
-        </div>
-      </div>
-      <div class="kr-fields">
-        <div>
-          <div class="kr-label">ラベル</div>
-          <input type="text" id="kr-lbl-${pin}" value="${meta.label}" maxlength="8" style="width:100%">
-        </div>
-        <div>
-          <div class="kr-label">ON値</div>
-          <div class="dh-row">
-            <input class="dh-dec" type="number" id="kr-on-${pin}" value="${swOnVals[pin]}" min="0" max="255"
-              oninput="syncHex('kr-on-'+${pin},'kr-on-h-'+${pin})">
-            <span class="dh-sep">0x</span>
-            <input class="dh-hex" type="text" id="kr-on-h-${pin}" value="${swOnVals[pin].toString(16).toUpperCase().padStart(2,'0')}" maxlength="2"
-              oninput="syncDec('kr-on-h-'+${pin},'kr-on-'+${pin})">
-          </div>
-        </div>
-        <div>
-          <div class="kr-label">OFF値</div>
-          <div class="dh-row">
-            <input class="dh-dec" type="number" id="kr-off-${pin}" value="${swOffVals[pin]}" min="0" max="255"
-              oninput="syncHex('kr-off-'+${pin},'kr-off-h-'+${pin})">
-            <span class="dh-sep">0x</span>
-            <input class="dh-hex" type="text" id="kr-off-h-${pin}" value="${swOffVals[pin].toString(16).toUpperCase().padStart(2,'0')}" maxlength="2"
-              oninput="syncDec('kr-off-h-'+${pin},'kr-off-'+${pin})">
-          </div>
-        </div>
-        <button class="s-set-btn" onclick="saveBtnCfg(${pin})">SET</button>
-      </div>`;
-    list.appendChild(row);
-  });
-}
-
-function setBtnMode(pin, mode) {
-  btnMeta[pin].mode = mode;
-  saveBtnMeta(); renderKeypadCfgList(); renderKeypad();
-}
-
-function saveBtnCfg(pin) {
-  const lbl  = document.getElementById(`kr-lbl-${pin}`).value || `SW${pin}`;
-  const onV  = parseInt(document.getElementById(`kr-on-${pin}`).value)  || 1;
-  const offV = parseInt(document.getElementById(`kr-off-${pin}`).value) || 0;
-  btnMeta[pin].label = lbl;
-  saveBtnMeta();
-  send(`SW_CFG=${pin},${onV},${offV}`);
-  log(`→ SW_CFG=${pin},${onV},${offV}`);
-  renderKeypad();
-}
-
-// ════════════════════════════════════════════
-// KEYPAD RENDER + ACTIONS
-// ════════════════════════════════════════════
-function renderKeypad() {
-  const auxPins = [];
-  for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
-
-  const empty = document.getElementById("keypad-empty");
-  const grid  = document.getElementById("keypad-grid");
-
-  if (auxPins.length === 0) {
-    empty.style.display = "flex";
-    grid.classList.remove("visible"); grid.innerHTML = ""; return;
-  }
-  empty.style.display = "none";
-  grid.innerHTML = "";
-
-  // Determine grid layout
-  const n = auxPins.length;
-  const cols = n <= 2 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : 4;
-  const rows = Math.ceil(n / cols);
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  grid.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
-  grid.classList.add("visible");
-
-  auxPins.forEach(pin => {
-    const meta  = btnMeta[pin];
-    const isOn  = swVals[pin] === swOnVals[pin];
-    const btn   = document.createElement("div");
-    btn.className = "kp-btn" + (isOn ? " on" : "") + (meta.mode==="momentary" ? " momentary" : "");
-    btn.id = `kp-${pin}`;
-    const srcLabel = swSrc[pin] === 'can' ? '📡CAN RX' : swSrc[pin] === 'ble' ? '📱BLE' : '';
-    btn.innerHTML = `
-      <div class="kb-label">${meta.label}</div>
-      <div class="kb-val">P${pin} · ${meta.mode==="momentary"?"PULSE":"TOGGLE"} · val:${swVals[pin]}</div>
-      <div class="kb-src">${srcLabel}</div>`;
-    if (swSrc[pin] === 'can') btn.classList.add('rx-changed');
-    btn.addEventListener("pointerdown", e => { e.preventDefault(); handleBtnDown(pin); });
-    btn.addEventListener("pointerup",   e => { e.preventDefault(); handleBtnUp(pin); });
-    btn.addEventListener("contextmenu", e => e.preventDefault());
-    btn.setAttribute("touch-action","none");
-    grid.appendChild(btn);
-  });
-}
-
-let holdTimers = {};
-
-function handleBtnDown(pin) {
-  const btn = document.getElementById(`kp-${pin}`);
-  if (btn) btn.classList.add("pressing");
-
-  const meta = btnMeta[pin];
-  if (meta.mode === "momentary") {
-    triggerPulse(pin);
-  } else {
-    executeToggle(pin);
-  }
-}
-
-function handleBtnUp(pin) {
-  const btn = document.getElementById(`kp-${pin}`);
-  if (btn) btn.classList.remove("pressing");
-}
-
-function executeToggle(pin) {
-  swSrc[pin] = 'ble';
-  const isOn = swVals[pin] === swOnVals[pin];
-  const newVal = isOn ? swOffVals[pin] : swOnVals[pin];
-  swVals[pin] = newVal;
-  send(`SW_SET=${pin},${newVal}`);
-  log(`→ SW P${pin} = ${newVal}`);
-  renderKeypad();
-  vibrate(15);
-}
-
-function triggerPulse(pin) {
-  swVals[pin] = swOnVals[pin];
-  send(`SW_SET=${pin},${swOnVals[pin]}`);
-  renderKeypad();
-  vibrate(20);
-  // momentary flash animation
-  const btn = document.getElementById(`kp-${pin}`);
-  if (btn) { btn.classList.add("momentary-flash"); setTimeout(()=>btn.classList.remove("momentary-flash"),450); }
-  setTimeout(() => {
-    swVals[pin] = swOffVals[pin];
-    send(`SW_SET=${pin},${swOffVals[pin]}`);
-    renderKeypad();
-  }, 150);
-}
-
-function vibrate(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
-
-// ════════════════════════════════════════════
-// GAUGE RENDER (Canvas arc)
-// ════════════════════════════════════════════
-function buildGaugeGrid() {
-  const g = document.getElementById("gauge-grid"); g.innerHTML = "";
-  for (let i=0; i<NUM_CH; i++) {
-    const cell = document.createElement("div");
-    cell.id = `gc-${i}`;
-    if (pinModes[i] === 0) {
-      // AUXピン → ボタンセル
-      _buildAuxCell(cell, i);
-    } else {
-      // INPUTピン → ゲージセル
-      cell.className = "gauge-cell";
-      const cvs = document.createElement("canvas");
-      cvs.id = `gcv-${i}`;
-      cell.appendChild(cvs);
-    }
-    g.appendChild(cell);
-  }
-  requestAnimationFrame(sizeCanvases);
-}
-
-function _buildAuxCell(cell, i) {
-  const meta = btnMeta[i];
-  const isOn = swVals[i] === swOnVals[i];
-  cell.className = "gauge-cell aux-btn" + (isOn ? " on" : "");
-  cell.innerHTML = `
-    <div class="gc-btn-pin">P${i}</div>
-    <div class="gc-btn-label">${meta.label}</div>
-    <div class="gc-btn-sub">${meta.mode==="momentary"?"PULSE":"TOGGLE"}</div>`;
-  cell.addEventListener("pointerdown", e => { e.preventDefault(); handleBtnDown(i); });
-  cell.addEventListener("pointerup",   e => { e.preventDefault(); handleBtnUp(i); });
-  cell.addEventListener("contextmenu", e => e.preventDefault());
-}
-
-function sizeCanvases() {
-  const dpr = devicePixelRatio || 1;
-  for (let i=0; i<NUM_CH; i++) {
-    const cell = document.getElementById(`gc-${i}`);
-    const cvs  = document.getElementById(`gcv-${i}`);
-    if (!cell||!cvs) continue;
-    cvs.width  = cell.clientWidth  * dpr;
-    cvs.height = cell.clientHeight * dpr;
-    cvs.style.width  = cell.clientWidth  + "px";
-    cvs.style.height = cell.clientHeight + "px";
-  }
-  renderAllGauges();
-}
-
-function renderAllGauges() {
-  for (let i=0;i<NUM_CH;i++) {
-    if (pinModes[i]===0) updateAuxBtn(i);
-    else drawGauge(i);
-  }
-}
-
-function updateAuxBtn(i) {
-  const cell = document.getElementById(`gc-${i}`);
-  if (!cell || !cell.classList.contains("aux-btn")) return;
-  const isOn = swVals[i] === swOnVals[i];
-  cell.classList.toggle("on", isOn);
-  const lbl = cell.querySelector(".gc-btn-label");
-  if (lbl) lbl.textContent = btnMeta[i].label;
-  const sub = cell.querySelector(".gc-btn-sub");
-  if (sub) sub.textContent = btnMeta[i].mode==="momentary"?"PULSE":"TOGGLE";
-}
-
-function updateAllAuxBtns() {
-  for (let i=0;i<NUM_CH;i++) if (pinModes[i]===0) updateAuxBtn(i);
-}
-
-function drawGauge(ch) {
-  const cvs = document.getElementById(`gcv-${ch}`); if (!cvs) return;
-  const ctx = cvs.getContext("2d");
-  const W=cvs.width, H=cvs.height;
-  const dpr = devicePixelRatio || 1;
-  const c = coeffs[ch];
-
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle = "#080b0f"; ctx.fillRect(0,0,W,H);
-
-  if (pinModes[ch] !== 1) {
-    ctx.fillStyle = "#1f2a38";
-    ctx.font = `bold ${Math.round(H*0.14)}px 'Barlow Condensed',sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("AUX / SW", W/2, H/2); return;
-  }
-
-  const cx=W/2, cy=H*0.62;
-  const r = Math.min(cx, cy) * 0.8;
-  const lw = r * 0.16;
-  const A0 = Math.PI * 225/180;
-  const A1 = Math.PI * 495/180;
-
-  const raw  = adcRaw[ch];
-  const val  = calcDisplayVal(ch, raw);
-  const pct  = Math.max(0, Math.min(1, (val-c.min)/(c.max-c.min)));
-  const vA   = A0 + pct*(A1-A0);
-
-  // BG arc
-  ctx.beginPath(); ctx.arc(cx,cy,r,A0,A1);
-  ctx.strokeStyle="#1a2535"; ctx.lineWidth=lw; ctx.lineCap="butt"; ctx.stroke();
-
-  // Tick marks
-  for (let t=0;t<=5;t++) {
-    const ta=A0+(t/5)*(A1-A0);
-    const x1=cx+Math.cos(ta)*(r-lw*.5), y1=cy+Math.sin(ta)*(r-lw*.5);
-    const x2=cx+Math.cos(ta)*(r+lw*.08),y2=cy+Math.sin(ta)*(r+lw*.08);
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
-    ctx.strokeStyle="#263040"; ctx.lineWidth=dpr; ctx.stroke();
-  }
-
-  // Value arc
-  if (pct>0.001) {
-    const g2=ctx.createLinearGradient(cx-r,cy,cx+r,cy);
-    g2.addColorStop(0,hexAlpha(c.color,.4)); g2.addColorStop(1,c.color);
-    ctx.beginPath(); ctx.arc(cx,cy,r,A0,vA);
-    ctx.strokeStyle=g2; ctx.lineWidth=lw; ctx.lineCap="butt"; ctx.stroke();
-    // tip glow
-    ctx.beginPath(); ctx.arc(cx,cy,r,Math.max(A0,vA-.18),vA);
-    ctx.strokeStyle=c.color; ctx.lineWidth=lw*1.2; ctx.lineCap="round";
-    ctx.shadowColor=c.color; ctx.shadowBlur=lw*2; ctx.stroke(); ctx.shadowBlur=0;
-  }
-
-  // Value text
-  const fs=Math.round(r*.42);
-  ctx.font=`bold ${fs}px 'Share Tech Mono',monospace`;
-  ctx.textAlign="center"; ctx.textBaseline="middle";
-  ctx.fillStyle=c.color; ctx.shadowColor=c.color; ctx.shadowBlur=fs*.4;
-  ctx.fillText(val.toFixed(c.dec), cx, cy-r*.06); ctx.shadowBlur=0;
-
-  // Unit
-  const ufs=Math.round(r*.19);
-  ctx.font=`${ufs}px 'Share Tech Mono',monospace`;
-  ctx.fillStyle="#4a5568"; ctx.fillText(c.unit, cx, cy+r*.22);
-
-  // Label
-  const lfs=Math.round(r*.2);
-  ctx.font=`700 ${lfs}px 'Barlow Condensed',sans-serif`;
-  ctx.fillStyle="#6a7a90";
-  ctx.fillText(c.label.toUpperCase(), cx, H*.09);
-
-  // Min/Max labels
-  const mfs=Math.round(r*.17);
-  ctx.font=`${mfs}px 'Share Tech Mono',monospace`;
-  ctx.fillStyle="#2a3a50";
-  const minX=cx+Math.cos(A0)*(r+lw*.9), minY=cy+Math.sin(A0)*(r+lw*.9);
-  const maxX=cx+Math.cos(A1)*(r+lw*.9), maxY=cy+Math.sin(A1)*(r+lw*.9);
-  ctx.textAlign="right"; ctx.fillText(c.min, minX, minY);
-  ctx.textAlign="left";  ctx.fillText(c.max, maxX, maxY);
-
-  // Raw ADC
-  ctx.font=`${Math.round(r*.15)}px 'Share Tech Mono',monospace`;
-  ctx.fillStyle="#1f2a38"; ctx.textAlign="center";
-  ctx.fillText(`${raw}`, cx, H*.94);
-}
-
-function hexAlpha(hex,a) {
-  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-// ════════════════════════════════════════════
-// COEFF SETTINGS UI
-// ════════════════════════════════════════════
-function renderCoeffChBar() {
-  // currentCoeffChがAUXになっていたら最初のINPUTピンに補正
-  if (pinModes[currentCoeffCh] === 0) {
-    const firstInput = pinModes.findIndex(m => m===1);
-    if (firstInput >= 0) currentCoeffCh = firstInput;
-  }
-  const bar=document.getElementById("coeff-ch-bar"); bar.innerHTML="";
-  for (let i=0;i<NUM_CH;i++) {
-    const b=document.createElement("button");
-    const isAux = pinModes[i]===0;
-    b.className="cc-btn"+(i===currentCoeffCh?" active":"")+(isAux?" aux-ch":"");
-    b.textContent = isAux ? `P${i}▪AUX` : `P${i}`;
-    if (!isAux) b.onclick=()=>{ currentCoeffCh=i; renderCoeffChBar(); loadCoeffForm(); };
-    else { b.style.cursor="default"; b.title="AUXモード(係数設定不要)"; }
-    bar.appendChild(b);
-  }
-}
-
-function loadCoeffForm() {
-  const c=coeffs[currentCoeffCh];
-  document.getElementById("cf-lbl").value   = c.label;
-  document.getElementById("cf-unit").value  = c.unit;
-  document.getElementById("cf-mul").value   = c.mul;
-  document.getElementById("cf-add").value   = c.add;
-  document.getElementById("cf-min").value   = c.min;
-  document.getElementById("cf-max").value   = c.max;
-  document.getElementById("cf-dec").value   = c.dec;
-  document.getElementById("cf-color").value = c.color;
-  document.getElementById("cf-r1").value    = c.r1 || 0;
-  document.getElementById("cf-r2").value    = c.r2 || 0;
-  updateDivInfo();
-  updateCoeffPreview();
-}
-
-["cf-mul","cf-add","cf-dec","cf-unit","cf-r1","cf-r2"].forEach(id => {
-  const el=document.getElementById(id);
-  if (el) el.addEventListener("input", () => { updateDivInfo(); updateCoeffPreview(); });
-});
-
-function updateCoeffPreview() {
-  const mul  = parseFloat(document.getElementById("cf-mul").value)||1;
-  const add  = parseFloat(document.getElementById("cf-add").value)||0;
-  const dec  = parseInt(document.getElementById("cf-dec").value)||0;
-  const unit = document.getElementById("cf-unit").value;
-  const r1   = parseFloat(document.getElementById("cf-r1").value)||0;
-  const r2   = parseFloat(document.getElementById("cf-r2").value)||0;
-  const divCorr = (r1>0 && r2>0) ? (r1+r2)/r2 : 1.0;
-  const raw  = adcRaw[currentCoeffCh];
-  const adcV = raw * (3.3/4095);
-  const srcV = adcV * divCorr;
-  const disp = srcV * mul + add;
-  document.getElementById("cf-prev-val").textContent = disp.toFixed(dec)+" "+unit;
-  document.getElementById("cf-prev-lbl").textContent = `P${currentCoeffCh}  raw:${raw}`;
-  const chainEl = document.getElementById("cf-prev-chain");
-  if (chainEl) {
-    if (divCorr !== 1.0) {
-      chainEl.textContent =
-        `ADC: ${adcV.toFixed(3)}V → 補正後: ${srcV.toFixed(3)}V × ${mul} + ${add}`;
-    } else {
-      chainEl.textContent =
-        `ADC: ${adcV.toFixed(3)}V × ${mul} + ${add}`;
-    }
-  }
-}
-
-function saveCoeff() {
-  const c = coeffs[currentCoeffCh];
-  c.label = document.getElementById("cf-lbl").value  || `CH${currentCoeffCh}`;
-  c.unit  = document.getElementById("cf-unit").value;
-  c.mul   = parseFloat(document.getElementById("cf-mul").value) || 1;
-  c.add   = parseFloat(document.getElementById("cf-add").value) || 0;
-  c.min   = parseFloat(document.getElementById("cf-min").value) || 0;
-  c.max   = parseFloat(document.getElementById("cf-max").value) || 5;
-  c.dec   = parseInt(document.getElementById("cf-dec").value)   || 0;
-  c.color = document.getElementById("cf-color").value;
-  c.r1    = parseFloat(document.getElementById("cf-r1").value)  || 0;
-  c.r2    = parseFloat(document.getElementById("cf-r2").value)  || 0;
-  saveCoeffsLocal(); renderAllGauges();
-  const corr = getDivCorr(currentCoeffCh);
-  const divStr = corr !== 1.0 ? ` [R1:${c.r1}Ω R2:${c.r2}Ω ×${corr.toFixed(3)}]` : "";
-  log(`P${currentCoeffCh} 保存: ×${c.mul} +${c.add} ${c.unit}${divStr}`);
-}
-
-// ════════════════════════════════════════════
-// RESISTOR DIVIDER INFO
-// ════════════════════════════════════════════
-function updateDivInfo() {
-  const r1  = parseFloat(document.getElementById("cf-r1").value) || 0;
-  const r2  = parseFloat(document.getElementById("cf-r2").value) || 0;
-  const info = document.getElementById("div-info");
-  if (!info) return;
-
-  if (r1 <= 0 || r2 <= 0) {
-    info.style.display = "none"; return;
-  }
-
-  info.style.display = "grid";
-  const ratio    = (r1 + r2) / r2;
-  const adcMax   = (r2 / (r1 + r2)) * 3.3;   // センサー最大電圧入力時のADCピン電圧
-  // ADCが 3.3V になるときのセンサー電圧
-  const srcMax   = 3.3 * ratio;
-  const isSafe   = adcMax <= 3.35;  // 小マージン込み
-
-  document.getElementById("div-ratio").textContent  = ratio.toFixed(4);
-  document.getElementById("div-adc-max").textContent = adcMax.toFixed(2) + "V";
-  document.getElementById("div-src-max").textContent = srcMax.toFixed(2) + "V";
-
-  const safeEl = document.getElementById("div-safe");
-  if (isSafe) {
-    safeEl.textContent = "✅ OK";
-    safeEl.style.color = "var(--ok)";
-  } else {
-    safeEl.textContent = "⚠️ NG";
-    safeEl.style.color = "var(--err)";
-  }
-
-  updateCoeffPreview();
-}
-
-// ════════════════════════════════════════════
-// LOG
-// ════════════════════════════════════════════
-function log(msg) {
-  const el=document.getElementById("s-log");
-  const ts=new Date().toTimeString().slice(0,8);
-  el.textContent=`[${ts}] ${msg}\n`+el.textContent.slice(0,2000);
-}
-
-// ════════════════════════════════════════════
-// INIT
-// ════════════════════════════════════════════
-// ── 画面消灯防止 (Wake Lock API) ──
-let _wakeLock = null;
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return;
-  try {
-    _wakeLock = await navigator.wakeLock.request('screen');
-    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
-  } catch(e) {}
-}
-// 画面が再表示された時に再取得
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') requestWakeLock();
-});
-
-window.addEventListener("load", () => {
-  requestWakeLock();  // 起動時に画面消灯防止を要求
-  buildGaugeGrid();
-  renderPinGrid();
-  renderKeypad();
-  renderCoeffChBar();
-  loadCoeffForm();
-
-  window.addEventListener("resize", () => sizeCanvases());
-  window.addEventListener("orientationchange", () => setTimeout(sizeCanvases,200));
-
-  // Demo animation while not connected
-  let demo=0;
-  const demoT=setInterval(()=>{
-    if (isConnected) { clearInterval(demoT); return; }
-    demo=(demo+1)%100;
-    for (let i=0;i<NUM_CH;i++) adcRaw[i]=Math.round(Math.sin((demo+i*12)/15)*500+600);
-    renderAllGauges();
-  }, 60);
-});
-</script>
-</body>
-</html>
+# ==========================================
+# ATOM S3R + Atomic CAN Base + EXT.I/O 2
+# Ver 2.8 - WiFi無効化でBLE安定化
+# 【重要】boot.py も一緒に書き込むこと
+# ==========================================
+# INPUT ピン : EXT.I/O 2 ADC読取 → CAN送信
+# AUX   ピン : キーパッドON/OFF  → 別CAN ID送信
+# ==========================================
+import M5
+from M5 import *
+import time
+from hardware import I2C, Pin
+from machine import SoftI2C
+from unit import CANUnit
+import bluetooth
+import struct
+import machine
+import gc
+try:
+    import network
+    network.WLAN(network.STA_IF).active(False)
+    network.WLAN(network.AP_IF).active(False)
+except: pass
+gc.collect()
+gc.collect()  # 起動前にメモリ解放
+from micropython import const
+from esp32 import NVS
+
+# ── ハードウェア定義 ──────────────────────
+TX_PIN      = 6
+RX_PIN      = 5
+CAN_BAUDRATE = 1000000  # デフォルト 1Mbps (NVSで変更可能)
+# 対応ボーレート: 125000, 250000, 500000, 1000000
+I2C_SCL_PIN = 1
+I2C_SDA_PIN = 2
+EXTIO2_ADDR = 0x45
+
+# ── EXT.I/O 2 レジスタマップ ──────────────
+# 公式: github.com/m5stack/M5Unit-ExtIO2
+REG_MODE_BASE  = 0x00  # モード設定レジスタ
+REG_ADC_BASE   = 0x40  # 12bit ADC (公式仕様: 0x40-0x4F, 2byte/ch)
+REG_OUT_BASE   = 0x10  # +pin      : デジタル出力
+EXTIO2_MODE_OUTPUT = 0x01  # デジタル出力
+EXTIO2_MODE_ADC    = 0x02  # ★ ADCモード (実機確認済み、4ではなく2)
+
+# ── デフォルト設定 ────────────────────────
+NUM_CH      = 8
+can_tx_id   = 0x500   # ADC用 CAN TX ID (Frame1=id, Frame2=id+1)
+sw_can_id   = 0x5A0   # スイッチ用 CAN TX ID (1フレーム8バイト)
+
+# pin_modes: 0=AUX(キーパッドスイッチ), 1=INPUT(ADC)
+pin_modes   = [1] * NUM_CH
+
+# スイッチ状態バッファ  can_state[i] = 現在のCANバイト値
+can_state   = bytearray(8)
+
+# スイッチON/OFF値 (ユーザー設定, デフォルト: ON=1, OFF=0)
+sw_on_vals  = [1] * NUM_CH
+sw_off_vals = [0] * NUM_CH
+
+# ── CAN受信 AUX制御 ───────────────────────
+can_rx_id    = 0x600      # EMTRONからの受信CAN ID (ユーザー設定可能)
+rx_on_vals   = [1] * NUM_CH  # 受信値がこれならAUX ON
+rx_off_vals  = [0] * NUM_CH  # 受信値がこれならAUX OFF
+can_lock_until  = 0       # (後方互換用、未使用)
+_can_rx_nvsave  = False   # NVS保存フラグ(CAN RX/設定変更共用)
+aux_ctrl_mode   = 0       # AUX制御モード: 0=Keypad(BLE), 1=CAN RX
+CAN_LOCK_MS  = 2000       # CAN優先ロック時間 (ms)
+can_endian   = 0          # 0=リトルエンディアン, 1=ビッグエンディアン
+
+# ── タイミング(ms) ─────────────────────────
+CAN_SEND_INT  = 50
+BLE_SEND_INT  = 50
+DISP_INT      = 600
+RECOVERY_INT  = 5000
+
+# ── 状態変数 ──────────────────────────────
+can           = None
+i2c_bus       = None
+extio_found   = False
+can_error     = False
+ble_tx_queue  = []
+ble_rx_queue  = []
+nvs           = None
+_pending_cfg  = False
+
+last_can_send = 0
+last_ble_send   = 0
+_sync_delay_at  = 0   # 設定同期の遅延タイマー
+last_display  = 0
+last_recovery = 0
+
+adc_raw       = [0] * NUM_CH   # 12bit ADC生値(移動平均後)
+_adc_buf      = [[0]*4 for _ in range(NUM_CH)]  # 移動平均バッファ(4サンプル)
+_adc_buf_idx  = 0
+
+# ── BLE UART (Nordic UART Service) ───────
+UART_UUID = bluetooth.UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
+UART_TX   = bluetooth.UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
+UART_RX   = bluetooth.UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
+_IRQ_CENTRAL_CONNECT    = const(1)
+_IRQ_CENTRAL_DISCONNECT = const(2)
+_IRQ_GATTS_WRITE        = const(3)
+
+
+class BLEUART:
+    def __init__(self, ble):
+        self._ble = ble
+        self._ble.active(True)
+        self._ble.irq(self._irq)
+        ((self._tx, self._rx),) = self._ble.gatts_register_services([
+            (UART_UUID, ((UART_TX, bluetooth.FLAG_NOTIFY),
+                         (UART_RX, bluetooth.FLAG_WRITE)))
+        ])
+        # ★ RX特性バッファを64バイトに拡張 (デフォルト20バイトでは長いコマンドが切断される)
+        # SET_ALL_PINS=1,1,1,1,1,1,0,0 = 28バイト → 20バイト制限で切り捨てられていた
+        self._ble.gatts_set_buffer(self._rx, 64)
+        self._connections = set()
+        self._advertise()
+
+    def _advertise(self):
+        # アドバタイズパケット構造:
+        #   [0x02, 0x01, 0x06]           Flags (LE General Discoverable, BR/EDR Not Supported)
+        #   [0x0D, 0x09, <name 12bytes>] Complete Local Name (length = 1+12 = 13 = 0x0D)
+        # ※ 以前は length=0x10(16) で 3 バイト多く、スマホ側でデバイス名を認識できなかった
+        name = b'M5S3R_AnaCAN'
+        adv = bytes([0x02, 0x01, 0x06,
+                     len(name) + 1, 0x09]) + name
+        try:
+            self._ble.gap_advertise(100_000, adv)
+        except Exception as e:
+            print("BLE advertise error:", e)
+
+    def _irq(self, event, data):
+        global _pending_cfg
+        if event == _IRQ_CENTRAL_CONNECT:
+            self._connections.add(data[0])
+            _pending_cfg = True
+        elif event == _IRQ_CENTRAL_DISCONNECT:
+            if data[0] in self._connections:
+                self._connections.remove(data[0])
+            self._advertise()
+        elif event == _IRQ_GATTS_WRITE:
+            try:
+                cmd = self._ble.gatts_read(self._rx).decode().strip()
+                if cmd:
+                    ble_rx_queue.append(cmd)
+            except: pass
+
+    def send(self, data):
+        for conn in self._connections:
+            try: self._ble.gatts_notify(conn, self._tx, data)
+            except: pass
+
+    @property
+    def connected(self):
+        return len(self._connections) > 0
+
+
+# ── NVS 保存 ──────────────────────────────
+def nvs_save_all():
+    if not nvs: return
+    try:
+        nvs.set_i32("can_tx_id", can_tx_id)
+        nvs.set_i32("sw_can_id", sw_can_id)
+        nvs.set_i32("can_rx_id", can_rx_id)
+        nvs.set_i32("can_baud", CAN_BAUDRATE)
+        nvs.set_i32("can_endian", can_endian)
+        nvs.set_i32("aux_ctrl", aux_ctrl_mode)
+        for i in range(NUM_CH):
+            nvs.set_i32(f"pin_mode_{i}", pin_modes[i])
+            nvs.set_i32(f"sw_on_{i}",   sw_on_vals[i])
+            nvs.set_i32(f"sw_off_{i}",  sw_off_vals[i])
+            nvs.set_i32(f"sw_state_{i}", int(can_state[i]))
+            nvs.set_i32(f"rx_on_{i}",   rx_on_vals[i])
+            nvs.set_i32(f"rx_off_{i}",  rx_off_vals[i])
+        nvs.commit()
+    except Exception as e:
+        print("NVS Save Err:", e)
+
+
+def nvs_save_state():
+    """スイッチ状態だけ高速保存"""
+    if not nvs: return
+    try:
+        for i in range(NUM_CH):
+            nvs.set_i32(f"sw_state_{i}", int(can_state[i]))
+        nvs.commit()
+    except: pass
+
+
+# ── EXT.I/O 2 ────────────────────────────
+def i2c_recover():
+    """I2Cバスハング時のリカバリ"""
+    try:
+        scl = Pin(I2C_SCL_PIN, Pin.OUT)
+        sda = Pin(I2C_SDA_PIN, Pin.IN)
+        for _ in range(9):
+            scl(0); time.sleep_us(50)
+            scl(1); time.sleep_us(50)
+            if sda(): break  # SDAがHIGHになったら解放完了
+        # STOP condition
+        scl(0); time.sleep_us(20)
+        Pin(I2C_SDA_PIN, Pin.OUT)(0); time.sleep_us(20)
+        scl(1); time.sleep_us(20)
+        Pin(I2C_SDA_PIN, Pin.OUT)(1)
+        time.sleep_ms(5)
+        # I2Cを再初期化
+        global i2c_bus
+        i2c_bus = I2C(0, scl=Pin(I2C_SCL_PIN), sda=Pin(I2C_SDA_PIN), freq=100000, timeout=10000)
+    except: pass
+
+
+def apply_pin_modes():
+    if not extio_found: return
+    for i in range(NUM_CH):
+        hw_mode = EXTIO2_MODE_ADC if pin_modes[i] == 1 else EXTIO2_MODE_OUTPUT
+        ok = False
+        for retry in range(3):  # 最大3回リトライ
+            try:
+                i2c_bus.writeto_mem(EXTIO2_ADDR, REG_MODE_BASE + i, bytes([hw_mode]))
+                time.sleep_ms(20)  # 10ms→20msに延長(STM32応答待ち)
+                # 書き込み確認: 読み返し
+                i2c_bus.writeto(EXTIO2_ADDR, bytes([REG_MODE_BASE + i]))
+                time.sleep_ms(5)
+                rb = i2c_bus.readfrom(EXTIO2_ADDR, 1)
+                if rb and rb[0] == hw_mode:
+                    ok = True
+                    break
+                time.sleep_ms(20)
+            except Exception as e:
+                time.sleep_ms(20)
+        if not ok:
+            # リトライ失敗時は直接書き込みだけ実施
+            try:
+                i2c_bus.writeto_mem(EXTIO2_ADDR, REG_MODE_BASE + i, bytes([hw_mode]))
+                time.sleep_ms(30)
+            except: pass
+    time.sleep_ms(100)  # 全ch設定後の確定待ち
+    # ★ AUXピンの物理出力を現在のcan_state値に合わせて初期化
+    write_all_aux_out()
+
+
+def write_aux_out(pin):
+    """AUXピンの物理出力をEXT.I/O 2のREG_OUTに書き込む"""
+    if not extio_found: return
+    if pin_modes[pin] != 0: return
+    hw_val = 1 if can_state[pin] == sw_on_vals[pin] else 0
+    try:
+        i2c_bus.writeto_mem(EXTIO2_ADDR, REG_OUT_BASE + pin, bytes([hw_val]))
+    except Exception as e:
+        print("write_aux_out ERR p" + str(pin) + ":" + str(e))
+
+
+def write_all_aux_out():
+    """全AUXピンの物理出力を一括更新"""
+    for i in range(NUM_CH):
+        if pin_modes[i] == 0:
+            write_aux_out(i)
+
+
+def read_adc_all():
+    """INPUT チャンネルの ADC 値を取得 (12bit, 4サンプル移動平均)"""
+    global _adc_buf_idx
+    if not extio_found: return
+    idx = _adc_buf_idx
+    deadline = time.ticks_add(time.ticks_ms(), 50)  # 全ch合計50ms以内に完了
+    for i in range(NUM_CH):
+        # タイムアウト: 50ms超えたら残chはスキップ
+        if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+            break
+        if pin_modes[i] != 1:
+            adc_raw[i] = 0
+            for k in range(4): _adc_buf[i][k] = 0
+            continue
+        raw = adc_raw[i]  # デフォルトは前回値
+        try:
+            reg = REG_ADC_BASE + i * 2
+            # writeto_mem: レジスタ指定→読み取りをSTOP挟まず1トランザクションで実行
+            d = i2c_bus.readfrom_mem(EXTIO2_ADDR, reg, 2)
+            if len(d) == 2:
+                raw = (d[0] | (d[1] << 8)) & 0x0FFF
+        except Exception as e:
+            # I2Cハング → バスリカバリ
+            i2c_recover()
+            raw = adc_raw[i]  # 前回値を維持
+
+        # 初回: バッファを実測値で埋める
+        if _adc_buf[i][0] == 0 and _adc_buf[i][1] == 0 and raw > 0:
+            for k in range(4): _adc_buf[i][k] = raw
+
+        _adc_buf[i][idx] = raw
+        adc_raw[i] = (_adc_buf[i][0] + _adc_buf[i][1] +
+                      _adc_buf[i][2] + _adc_buf[i][3]) >> 2
+    _adc_buf_idx = (idx + 1) & 3
+
+
+# ── CAN ──────────────────────────────────
+def build_can_frame(start_ch):
+    """4ch分を8バイトCANフレームへパック (LE/BE切替対応, 12bit)"""
+    buf = bytearray(8)
+    for j in range(4):
+        val = adc_raw[start_ch + j] & 0x0FFF
+        if can_endian == 0:  # リトルエンディアン
+            buf[j * 2]     = val & 0xFF
+            buf[j * 2 + 1] = (val >> 8) & 0x0F
+        else:                # ビッグエンディアン
+            buf[j * 2]     = (val >> 8) & 0x0F
+            buf[j * 2 + 1] = val & 0xFF
+    return buf
+
+
+def safe_can_send(cid, data):
+    global can_error
+    if can:
+        try:
+            can.send(data, cid, timeout=0)
+            can_error = False
+        except:
+            can_error = True
+
+
+def check_can_recovery():
+    global can, last_recovery, can_error
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_recovery) < RECOVERY_INT: return
+    last_recovery = now
+    # EXT.I/O 2 ピンモード定期再適用 (STM32リセット対策)
+    apply_pin_modes()
+    try:
+        if can and can.state() != CANUnit.RUNNING:
+            can_error = True
+            can.deinit()
+            time.sleep_ms(50)
+            can = CANUnit(0, port=(TX_PIN, RX_PIN),
+                          mode=CANUnit.NORMAL, baudrate=CAN_BAUDRATE)
+            time.sleep_ms(100)
+            can_error = False
+    except: pass
+
+
+def send_sw_can():
+    """スイッチ状態を sw_can_id で CAN 送信"""
+    safe_can_send(sw_can_id, can_state)
+
+
+def process_can_rx():
+    """CAN受信 → AUX制御 (CAN RXモード時のみ)"""
+    global can_lock_until, _can_rx_nvsave
+    if not can: return
+    if aux_ctrl_mode != 1: return
+    if not uart.connected: return  # BLE未接続時はスキップ  # Keypadモード時はCAN RXを無視
+    try:
+        # 1ループで最大4フレームまで処理(ループブロック防止)
+        for _ in range(4):
+            if not can.any(0): break
+            msg = can.recv(0)
+            if not msg or len(msg) < 5: continue
+            rx_id = msg[0]
+            if rx_id != can_rx_id: continue
+            data = msg[4]
+            changed = False
+            for i in range(NUM_CH):
+                if pin_modes[i] != 0: continue
+                if i >= len(data): continue
+                v = data[i]
+                if v == rx_on_vals[i]:
+                    can_state[i] = sw_on_vals[i] & 0xFF
+                    changed = True
+                elif v == rx_off_vals[i]:
+                    can_state[i] = sw_off_vals[i] & 0xFF
+                    changed = True
+            if changed:
+                write_all_aux_out()  # ★ EXT.I/O 2の物理ピンに出力
+                can_lock_until = time.ticks_add(time.ticks_ms(), CAN_LOCK_MS)
+                send_sw_can()
+                _can_rx_nvsave = True
+                # SW_VALS / RX_ACT はキューをバイパスして即送信（遅延防止）
+                _sw_msg = ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
+                _rx_msg = ("RX_ACT="  + ",".join(str(b) for b in can_state)).encode()
+                try:
+                    if uart.connected:
+                        uart.send(_sw_msg)
+                        uart.send(_rx_msg)
+                except:
+                    ble_tx_queue.append(_sw_msg)
+    except Exception as e:
+        pass  # CAN RX エラーは無視
+
+
+# ── BLE コマンド処理 ──────────────────────
+def queue_config_sync():
+    """接続時に全設定をクライアントへ送信"""
+    # I2C / EXT.IO2 状態を通知
+    io_status = "IO:OK" if extio_found else "IO:NG(EXT.IO2未検出)"
+    # 設定同期: 2パケットに分割して送信(MTU考慮)
+    cfg1 = ("CFG1="
+            + "LOG=" + io_status
+            + "|TXID=" + hex(can_tx_id)
+            + "|SW_TXID=" + hex(sw_can_id)
+            + "|RX_ID=" + hex(can_rx_id)
+            + "|ENDIAN=" + str(can_endian)
+            + "|AUX_MODE=" + str(aux_ctrl_mode)
+            + "|BAUD=" + str(CAN_BAUDRATE))
+    cfg2 = ("CFG2="
+            + "PIN_MODES=" + ",".join(str(m) for m in pin_modes)
+            + "|SW_ON=" + ",".join(str(v) for v in sw_on_vals)
+            + "|SW_OFF=" + ",".join(str(v) for v in sw_off_vals)
+            + "|RX_ON=" + ",".join(str(v) for v in rx_on_vals)
+            + "|RX_OFF=" + ",".join(str(v) for v in rx_off_vals)
+            + "|SW_VALS=" + ",".join(str(b) for b in can_state))
+    ble_tx_queue.append(cfg1.encode())
+    ble_tx_queue.append(cfg2.encode())
+
+
+def process_ble_cmd():
+    global can_tx_id, sw_can_id, can_rx_id, can_endian, CAN_BAUDRATE, aux_ctrl_mode, pin_modes, sw_on_vals, sw_off_vals, rx_on_vals, rx_off_vals, _sync_delay_at
+    if not ble_rx_queue: return
+    cmd = ble_rx_queue.pop(0)
+    try:
+        # ── 設定要求 ──────────────────────────
+        if cmd == "REQUEST_STATE":
+            queue_config_sync()
+            return
+
+        # ── ADC CAN TX ID   SET_TXID=0x501 ───
+        if cmd.startswith("SET_TXID="):
+            can_tx_id = int(cmd.split('=')[1], 16)
+            nvs_save_all()
+            ble_tx_queue.append(f"TXID={hex(can_tx_id)}".encode())
+
+        # ── スイッチ CAN TX ID  SW_TXID=0x5A0 ─
+        elif cmd.startswith("SW_TXID="):
+            sw_can_id = int(cmd.split('=')[1], 16)
+            nvs_save_all()
+            ble_tx_queue.append(f"SW_TXID={hex(sw_can_id)}".encode())
+
+        # ── ピンモード変更  SET_PIN_MODE=3,0 ──
+        elif cmd.startswith("SET_PIN_MODE="):
+            p = cmd.split('=')[1].split(',')
+            pin = int(p[0]); mode = int(p[1])
+            if 0 <= pin < NUM_CH:
+                pin_modes[pin] = mode
+                if mode == 0:           # AUXになったらOFF値をセット
+                    can_state[pin] = sw_off_vals[pin]
+                apply_pin_modes()
+                nvs_save_all()
+                ble_tx_queue.append(
+                    ("PIN_MODES=" + ",".join(str(m) for m in pin_modes)).encode()
+                )
+                ble_tx_queue.append(
+                    ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
+                )
+
+        # ── スイッチON/OFF値設定  SW_CFG=pin,on,off ──
+        elif cmd.startswith("SW_CFG="):
+            p = cmd.split('=')[1].split(',')
+            pin = int(p[0]); on_v = int(p[1]); off_v = int(p[2])
+            if 0 <= pin < NUM_CH:
+                sw_on_vals[pin]  = on_v  & 0xFF
+                sw_off_vals[pin] = off_v & 0xFF
+                if can_state[pin] != sw_on_vals[pin]:
+                    can_state[pin] = sw_off_vals[pin]
+                nvs_save_all()
+                ble_tx_queue.append(
+                    f"SW_CFG_OK={pin},{sw_on_vals[pin]},{sw_off_vals[pin]}".encode()
+                )
+
+        # ── スイッチ操作  SW_SET=pin,val ─────
+        elif cmd.startswith("SW_SET="):
+            p = cmd.split('=')[1].split(',')
+            pin = int(p[0]); val = int(p[1])
+            if 0 <= pin < NUM_CH:
+                if aux_ctrl_mode != 0:
+                    ble_tx_queue.append(b"SW_LOCK=CANRX")  # CAN RXモード時は無視
+                else:
+                    can_state[pin] = val & 0xFF
+                    write_aux_out(pin)  # ★ EXT.I/O 2の物理ピンに出力
+                    send_sw_can()
+                    nvs_save_state()
+                    ble_tx_queue.append(
+                        ("SW_VALS=" + ",".join(str(b) for b in can_state)).encode()
+                    )
+
+        # ── CAN受信ID設定  SET_RX_ID=0x600 ──
+        elif cmd.startswith("SET_RX_ID="):
+            can_rx_id = int(cmd.split('=')[1], 16)
+            nvs_save_all()
+            print("SET_RX_ID: " + hex(can_rx_id))
+            ble_tx_queue.append(f"RX_ID={hex(can_rx_id)}".encode())
+
+        # ── CAN受信 ON値設定  RX_ON=pin,val ─
+        elif cmd.startswith("RX_ON="):
+            p = cmd.split('=')[1].split(',')
+            pin = int(p[0]); val = int(p[1])
+            if 0 <= pin < NUM_CH:
+                rx_on_vals[pin] = val
+                nvs_save_all()
+                ble_tx_queue.append(f"RX_ON_OK={pin},{val}".encode())
+
+        # ── CAN受信 OFF値設定  RX_OFF=pin,val
+        elif cmd.startswith("RX_OFF="):
+            p = cmd.split('=')[1].split(',')
+            pin = int(p[0]); val = int(p[1])
+            if 0 <= pin < NUM_CH:
+                rx_off_vals[pin] = val
+                nvs_save_all()
+                ble_tx_queue.append(f"RX_OFF_OK={pin},{val}".encode())
+
+        # ── AUX制御モード  SET_AUX_MODE=0(Keypad) / SET_AUX_MODE=1(CAN RX)
+        elif cmd.startswith("SET_AUX_MODE="):
+            aux_ctrl_mode = int(cmd.split('=')[1]) & 1
+            nvs_save_all()
+            ble_tx_queue.append(b"AUX_MODE=" + str(aux_ctrl_mode).encode())
+
+        # ── ピンモード一括設定+再起動  SET_ALL_PINS=1,0,1,0,... ──
+        elif cmd.startswith("SET_ALL_PINS="):
+            vals = cmd.split('=')[1].split(',')
+            for i in range(min(len(vals), NUM_CH)):
+                pin_modes[i] = int(vals[i]) & 1
+            print("SET_ALL_PINS rcv: " + str(pin_modes))
+            nvs_save_all()
+            apply_pin_modes()
+            pm_str = ",".join([str(m) for m in pin_modes])
+            uart.send(("PIN_MODES=" + pm_str).encode())
+            time.sleep_ms(200)
+            uart.send(b"RESTARTING")
+            time.sleep_ms(500)
+            machine.reset()
+
+        # ── デバイス再起動  RESTART ──
+        elif cmd == "RESTART":
+            uart.send(b"RESTARTING")
+            time.sleep_ms(500)
+            machine.reset()
+
+        # ── エンディアン設定  SET_ENDIAN=0(LE) / SET_ENDIAN=1(BE)
+        elif cmd.startswith("SET_ENDIAN="):
+            can_endian = int(cmd.split('=')[1]) & 1
+            nvs_save_all()
+            ble_tx_queue.append(f"ENDIAN={can_endian}".encode())
+
+        # ── CANボーレート変更  SET_BAUD=1000000 ──
+        elif cmd.startswith("SET_BAUD="):
+            baud = int(cmd.split('=')[1])
+            if baud in [125000, 250000, 500000, 1000000]:
+                CAN_BAUDRATE = baud
+                nvs_save_all()
+                # CANを再初期化
+                try:
+                    if can: can.deinit()
+                    time.sleep_ms(50)
+                    can = CANUnit(0, port=(TX_PIN, RX_PIN),
+                                  mode=CANUnit.NORMAL, baudrate=CAN_BAUDRATE)
+                    can_error = False
+                    print("CAN reinit: " + str(CAN_BAUDRATE) + "bps OK")
+                except Exception as e:
+                    can_error = True
+                    print("CAN reinit ERR: " + str(e))
+                ble_tx_queue.append(f"BAUD={CAN_BAUDRATE}".encode())
+
+    except Exception as e:
+        print("BLE CMD Err:", cmd, e)
+
+
+def send_adc_packet(uart):
+    """ADC+SW+STATUS を1パケットで送信 (BLE帯域効率化)"""
+    avals = ",".join(str(adc_raw[i]) for i in range(NUM_CH))
+    swals = ",".join(str(b) for b in can_state)
+    st    = "1" if not can_error else "0"
+    try: uart.send(("AVALS=" + avals + "|SW=" + swals + "|ST=" + st).encode())
+    except: pass
+
+
+# ── ディスプレイ (ATOMS3R 128x128px) ───
+_disp_row = 0
+
+
+def disp_line(text, color=0xFFFF):
+    global _disp_row
+    M5.Display.setCursor(0, _disp_row * 13)
+    M5.Display.setTextColor(color, 0x0000)
+    M5.Display.print(text[:21])
+    _disp_row += 1
+
+
+def update_display():
+    global _disp_row
+    _disp_row = 0
+    M5.Display.setTextSize(1)
+    W = M5.Display.width()
+
+    def dline(txt, col=0xFFFF):
+        global _disp_row
+        y = _disp_row * 13
+        M5.Display.fillRect(0, y, W, 13, 0x0000)
+        M5.Display.setTextColor(col, 0x0000)
+        M5.Display.setCursor(0, y)
+        M5.Display.print(txt[:21])
+        _disp_row += 1
+
+    can_col = 0xF800 if can_error else 0x07E0
+    ble_col = 0x07E0 if uart.connected else 0x8410
+    baud_k  = CAN_BAUDRATE // 1000
+
+    dline("= AnaCAN v2.7 =", 0x07FF)
+    dline("CAN:" + ("ERR" if can_error else " OK "), can_col)
+    dline("BLE:" + ("ON " if uart.connected else "---") + " IO:" + ("Y" if extio_found else "N"), ble_col)
+    dline("BAUD:" + str(baud_k) + "k " + ("LE" if can_endian==0 else "BE"), 0xFFFF)
+    dline("-" * 21, 0x4208)
+
+    for i in range(NUM_CH):
+        if pin_modes[i] == 0:
+            is_on = (can_state[i] == sw_on_vals[i])
+            dline("P" + str(i) + ":" + ("ON " if is_on else "OFF") + " val=" + str(can_state[i]),
+                  0x07E0 if is_on else 0xF800)
+
+    shown = 0
+    for i in range(NUM_CH):
+        if pin_modes[i] == 1 and shown < 4:
+            v = adc_raw[i]
+            volt = v * 3.3 / 4095
+            v_str = ("   " + str(v))[-4:]
+            vf = str(int(volt * 10) // 10) + "." + str(int(volt * 10) % 10)
+            dline("P" + str(i) + ":" + v_str + " " + vf + "V", 0xFFFF)
+            shown += 1
+
+
+# ──────────────────────────────────────────
+# 初期化
+# ──────────────────────────────────────────
+M5.begin()
+M5.Display.setTextSize(1)
+M5.Display.clear(0x0000)
+M5.Display.setTextColor(0x07FF, 0x0000)
+M5.Display.print("Booting v2.7...")
+
+# NVS ロード
+try:
+    nvs = NVS("ana_can")
+    try: can_tx_id = nvs.get_i32("can_tx_id")
+    except: pass
+    try: sw_can_id = nvs.get_i32("sw_can_id")
+    except: pass
+    try: can_rx_id = nvs.get_i32("can_rx_id")
+    except: pass
+    try: CAN_BAUDRATE = nvs.get_i32("can_baud")
+    except: pass
+    try: can_endian = nvs.get_i32("can_endian")
+    except: pass
+    try: aux_ctrl_mode = nvs.get_i32("aux_ctrl")
+    except: pass
+    for i in range(NUM_CH):
+        try: pin_modes[i]   = nvs.get_i32(f"pin_mode_{i}")
+        except: pass
+        try: sw_on_vals[i]  = nvs.get_i32(f"sw_on_{i}")
+        except: pass
+        try: sw_off_vals[i] = nvs.get_i32(f"sw_off_{i}")
+        except: pass
+        try: can_state[i]   = nvs.get_i32(f"sw_state_{i}") & 0xFF
+        except: pass
+        try: rx_on_vals[i]  = nvs.get_i32(f"rx_on_{i}")
+        except: pass
+        try: rx_off_vals[i] = nvs.get_i32(f"rx_off_{i}")
+        except: pass
+    print("NVS: ADC=" + hex(can_tx_id) + " SW=" + hex(sw_can_id))
+except Exception as e:
+    print("NVS Init Err:", e)
+
+# I2C + EXT.I/O 2
+try:
+    i2c_bus = I2C(0, scl=Pin(I2C_SCL_PIN), sda=Pin(I2C_SDA_PIN), freq=100000, timeout=10000)
+    time.sleep_ms(100)
+    scan = i2c_bus.scan()
+    found_addrs = [hex(a) for a in scan]
+    print("I2C scan: " + str(found_addrs))
+    extio_found = EXTIO2_ADDR in scan
+    if extio_found:
+        print("EXT.I/O 2: Found at 0x45 ✅")
+        time.sleep_ms(200)    # STM32起動待ち
+        apply_pin_modes()
+        time.sleep_ms(300)    # STM32 ADCモード確定待ち
+        print("EXT.I/O 2: ADCモード設定完了")
+    else:
+        print("EXT.I/O 2: NOT found  scan=" + str(found_addrs))
+except Exception as e:
+    print("I2C Fail:", e)
+
+# CAN
+gc.collect()
+try:
+    can = CANUnit(0, port=(TX_PIN, RX_PIN),
+                  mode=CANUnit.NORMAL, baudrate=CAN_BAUDRATE)
+    time.sleep_ms(100)
+    print("CAN Init OK")
+except Exception as e:
+    print("CAN Init Fail:", e)
+    can_error = True
+
+# BLE
+gc.collect()
+print("Free RAM before BLE:", gc.mem_free())
+ble  = bluetooth.BLE()
+uart = BLEUART(ble)
+gc.collect()
+print("Free RAM after BLE:", gc.mem_free())
+print("=" * 32)
+print("BLE アドバタイズ開始")
+print("  デバイス名: M5S3R_AnaCAN")
+print("  接続手順:")
+print("  1. Chrome(PC/Android) HTTPS で開く")
+print("  2. CONNECT ボタンを押す")
+print("  3. M5S3R_AnaCAN を選択")
+print("=" * 32)
+
+time.sleep_ms(200)
+update_display()
+
+# ──────────────────────────────────────────
+# メインループ
+# ──────────────────────────────────────────
+while True:
+    M5.update()
+    now = time.ticks_ms()
+
+    process_can_rx()   # CAN受信 (EMTRON → AUX制御, CAN優先)
+
+    # CAN RX後のNVS保存を遅延実行(メインループ負荷軽減)
+    if _can_rx_nvsave:
+        _can_rx_nvsave = False
+        nvs_save_state()
+
+    process_ble_cmd()
+
+    if _pending_cfg:
+        _pending_cfg = False
+        _sync_delay_at = time.ticks_add(time.ticks_ms(), 300)
+
+    # ADC読み取りを20Hz制限 (8ch×1ms=8ms/回 → ループをブロックしすぎない)
+    if time.ticks_diff(now, last_can_send) >= CAN_SEND_INT:
+        read_adc_all()
+
+    # CAN 送信 (20Hz)
+    if time.ticks_diff(now, last_can_send) >= CAN_SEND_INT:
+        if any(pin_modes[i] == 1 for i in range(NUM_CH)):
+            safe_can_send(can_tx_id,     build_can_frame(0))
+            safe_can_send(can_tx_id + 1, build_can_frame(4))
+        if any(pin_modes[i] == 0 for i in range(NUM_CH)):
+            send_sw_can()
+        last_can_send = now
+
+    # 設定同期遅延タイマー (ブロッキングsleep_ms排除)
+    if _sync_delay_at and time.ticks_diff(time.ticks_ms(), _sync_delay_at) >= 0:
+        _sync_delay_at = 0
+        queue_config_sync()
+
+    # BLE 送信 (1回/loop、キューを1件ずつ処理)
+    if ble_tx_queue:
+        item = ble_tx_queue.pop(0)
+        try: uart.send(item)
+        except: pass
+    elif time.ticks_diff(now, last_ble_send) >= BLE_SEND_INT:
+        if uart.connected:
+            send_adc_packet(uart)  # AVALS+SW+ST を1パケットで送信
+        last_ble_send = now
+
+    # ディスプレイ更新 + GC (低頻度)
+    if time.ticks_diff(now, last_display) >= DISP_INT:
+        check_can_recovery()
+        update_display()
+        gc.collect()   # メモリ断片化防止
+        last_display = now
+
+    time.sleep_ms(2)
