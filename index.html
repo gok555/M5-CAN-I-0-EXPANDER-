@@ -1327,17 +1327,18 @@ function renderPinGrid() {
 
 function togglePin(i) {
   pinModes[i] = pinModes[i]===1 ? 0 : 1;
-  renderPinGrid(); applyPinModesUI();
-  renderKeypadCfgList();
+  applyPinModesUI();
   // ※ SET & 再起動ボタンで確定
 }
 
 function applyPinModesUI() {
-  // セルを再構築（INPUT↔AUX切替で構造が変わるため）
   buildGaugeGrid();
   requestAnimationFrame(() => { sizeCanvases(); updateAllAuxBtns(); });
   renderPinGrid();
   renderCoeffChBar();
+  // 現在のAUXモードに合わせて設定リストを即時更新
+  if (auxCtrlMode === 1) renderRxCfgList();
+  else renderKeypadCfgList();
 }
 
 // ════════════════════════════════════════════
