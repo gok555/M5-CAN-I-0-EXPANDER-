@@ -33,10 +33,8 @@ html, body {
   user-select: none; -webkit-user-select: none;
 }
 
-/* ══════════ LAYOUT ══════════════════════ */
 #app { width: 100%; height: 100%; display: flex; flex-direction: column; }
 
-/* ══════════ TOPBAR ══════════════════════ */
 #topbar {
   display: flex; align-items: center; gap: 6px;
   padding: 0 8px; height: 42px; flex-shrink: 0;
@@ -61,7 +59,6 @@ html, body {
 .t-badge.err { color: var(--err); border-color: var(--err); }
 .t-badge.ble { color: var(--accent); border-color: var(--accent); }
 
-/* tab buttons */
 .t-tabs { display: flex; gap: 2px; }
 .t-tab {
   font-family: var(--head); font-weight: 700;
@@ -78,7 +75,6 @@ html, body {
 }
 .t-icon-btn:active { border-color: var(--accent); color: var(--accent); }
 
-/* ══════════ CONNECT OVERLAY ═════════════ */
 #connect-overlay {
   position: absolute; inset: 42px 0 0 0;
   display: flex; flex-direction: column;
@@ -107,12 +103,10 @@ html, body {
 #connect-btn:active { transform: scale(0.95); box-shadow: 0 0 48px rgba(0,229,255,0.36); }
 #connect-btn .ci { font-size: 1.8rem; }
 
-/* ══════════ VIEWS ═══════════════════════ */
 #content { flex: 1; overflow: hidden; position: relative; }
 .view { position: absolute; inset: 0; display: none; flex-direction: column; }
 .view.active { display: flex; }
 
-/* ════════ GAUGE VIEW ════════════════════ */
 #view-gauge { background: var(--bg); padding: 5px; }
 #gauge-grid {
   display: grid; width: 100%; height: 100%; gap: 4px;
@@ -159,7 +153,6 @@ html, body {
 }
 .gauge-cell canvas { display: block; width: 100%; height: 100%; }
 
-/* ════════ KEYPAD VIEW ═══════════════════ */
 #view-keypad { background: var(--bg); padding: 5px; overflow: hidden; }
 #keypad-empty {
   flex: 1; display: flex; flex-direction: column;
@@ -206,7 +199,6 @@ html, body {
 .kp-btn.on .kb-val { color: var(--sw-on); }
 .kp-btn:active, .kp-btn.pressing { transform: scale(0.95); opacity: 0.85; }
 
-/* momentary pulse ring */
 @keyframes pulse-ring {
   0%   { transform: scale(1); opacity: 0.7; }
   100% { transform: scale(2.5); opacity: 0; }
@@ -217,7 +209,6 @@ html, body {
   animation: pulse-ring 0.4s ease-out forwards;
 }
 
-/* ════════ SETTINGS VIEW ════════════════ */
 #view-settings {
   background: var(--bg2); overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -242,7 +233,6 @@ html, body {
   margin-bottom: 10px; text-transform: uppercase;
 }
 
-/* ID row */
 .id-row { display: flex; align-items: center; gap: 8px; }
 .id-row label { font-size: 0.8rem; color: var(--txt2); white-space: nowrap; }
 .id-row input {
@@ -253,7 +243,6 @@ html, body {
 .id-row input:focus { outline: none; border-color: var(--accent); }
 .id-note { font-size: 0.68rem; color: var(--txt2); margin-top: 4px; }
 
-/* set btn */
 .s-set-btn {
   padding: 10px 16px; background: var(--accent2); border: none;
   border-radius: 5px; color: #fff; font-family: var(--head);
@@ -265,7 +254,6 @@ html, body {
   font-weight: 700; font-size: 0.9rem; cursor: pointer;
 }
 
-/* pin grid */
 .pin-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
 .pin-card {
   background: var(--bg3); border: 1px solid var(--border);
@@ -280,7 +268,6 @@ html, body {
 .pin-card.aux-mode .pc-mode { color: var(--txt2); }
 .pin-card:active { transform: scale(0.95); }
 
-/* coeff channel select */
 .coeff-ch-bar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
 .cc-btn {
   padding: 5px 9px; background: var(--bg3);
@@ -291,7 +278,6 @@ html, body {
 .cc-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,0.07); }
 .cc-btn.aux-ch { border-style: dashed; color: var(--txt2); }
 
-/* keypad button config list */
 .kp-cfg-list { display: flex; flex-direction: column; gap: 8px; }
 .kp-cfg-row {
   background: var(--bg3); border: 1px solid var(--border);
@@ -319,7 +305,6 @@ html, body {
 }
 .kr-mode-opt.sel { background: var(--border); color: #fff; font-weight: 700; }
 
-/* coeff form */
 .coeff-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cf-field { display: flex; flex-direction: column; gap: 4px; }
 .cf-field label { font-size: 0.7rem; color: var(--txt2); }
@@ -348,7 +333,6 @@ html, body {
 }
 .cf-prev-val { font-size: 1.7rem; color: var(--ok); font-family: var(--mono); }
 .cf-prev-lbl { font-size: 0.7rem; color: var(--txt2); margin-top: 2px; }
-/* CAN RXモード時のKeypadグレーアウト */
 #view-keypad.canrx-mode #keypad-grid { opacity:0.4; pointer-events:none; }
 #view-keypad.canrx-mode::before {
   content:'📡 CAN RXモード';
@@ -357,7 +341,6 @@ html, body {
   background:rgba(255,152,0,0.08); border-radius:6px; margin-bottom:6px;
 }
 
-/* 再起動オーバーレイ */
 #restart-overlay {
   display:none; position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,0.85); flex-direction:column;
@@ -372,7 +355,6 @@ html, body {
 }
 @keyframes spin { to { transform:rotate(360deg); } }
 
-/* 確認ダイアログ */
 #confirm-dialog {
   display:none; position:fixed; inset:0; z-index:9998;
   background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
@@ -415,7 +397,6 @@ html, body {
 .dh-hex { width:52px; text-transform:uppercase; }
 .dh-sep { font-size:0.8rem; color:var(--txt2); white-space:nowrap; }
 
-/* dec/hex 2入力フィールド (rx-cfg-list内でも使用) */
 .dh-row { display:flex; align-items:center; gap:4px; }
 .dh-row .dh-dec { width:56px; }
 .dh-row .dh-hex { width:44px; }
@@ -426,7 +407,6 @@ html, body {
   color:var(--txt); font-size:0.85rem; cursor:pointer; transition:all .2s;
 }
 .baud-btn.active { background:var(--acc); color:#000; font-weight:700; }
-/* CAN RX ステータスバー (キーパッド画面上部) */
 .rx-statusbar {
   display:flex; align-items:center; gap:8px;
   padding:4px 8px; margin-bottom:4px;
@@ -452,7 +432,6 @@ html, body {
   40%  { opacity:1; }
   100% { opacity:0.9; }
 }
-/* キーパッドボタン: CAN受信で変化した場合 */
 .kp-btn.rx-changed {
   outline: 2px solid #ff9800;
   outline-offset: 2px;
@@ -472,7 +451,6 @@ html, body {
   font-size: 1rem; letter-spacing: 0.1em; cursor: pointer;
 }
 
-/* log */
 #s-log {
   height: 76px; overflow-y: auto;
   background: #000; color: #0f0;
@@ -481,15 +459,13 @@ html, body {
 }
 </style>
 
-  <!-- PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="I/O CAN">
   <meta name="theme-color" content="#00e5ff">
   <link rel="manifest" href="data:application/json,{%22name%22:%22I/O%20CAN%22,%22short_name%22:%22I/OCAN%22,%22theme_color%22:%2200e5ff%22,%22background_color%22:%22080d14%22,%22display%22:%22standalone%22,%22start_url%22:%22./%22}">
-  <!-- PWA icon (inline SVG → base64) -->
-  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzA2MTIyMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwMjA4MTAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImN5YW5fZ3JhZCIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMDA5OWNjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzAwZTVmZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ib3JhbmdlX2dyYWQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIwIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmNjYwMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmZmFhMDAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8ZmlsdGVyIGlkPSJnbG93X2MiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIzIiByZXN1bHQ9ImIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJiIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgICA8ZmlsdGVyIGlkPSJnbG93X28iPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyLjUiIHJlc3VsdD0iYiIvPgogICAgICA8ZmVNZXJnZT48ZmVNZXJnZU5vZGUgaW49ImIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+CiAgICA8L2ZpbHRlcj4KICAgIDxjbGlwUGF0aCBpZD0icm91bmRfY2xpcCI+CiAgICAgIDxyZWN0IHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iMzYiLz4KICAgIDwvY2xpcFBhdGg+CiAgPC9kZWZzPgoKICA8IS0tIOiDjOaZryAtLT4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjM2IiBmaWxsPSJ1cmwoI2JnKSIvPgoKICA8IS0tIOWbnui3r+Wfuuadv+OCsOODquODg+ODieODhuOCr+OCueODgeODoyAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMDgiPgogICAgPGxpbmUgeDE9IjAiIHkxPSIzMCIgeDI9IjE4MCIgeTI9IjMwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMCIgeTE9IjYwIiB4Mj0iMTgwIiB5Mj0iNjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iOTAiIHgyPSIxODAiIHkyPSI5MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjAiIHkxPSIxMjAiIHgyPSIxODAiIHkyPSIxMjAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iMTUwIiB4Mj0iMTgwIiB5Mj0iMTUwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMzAiIHkxPSIwIiB4Mj0iMzAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICAgIDxsaW5lIHgxPSI2MCIgeTE9IjAiIHgyPSI2MCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjkwIiB5MT0iMCIgeDI9IjkwIiB5Mj0iMTgwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgICA8bGluZSB4MT0iMTIwIiB5MT0iMCIgeDI9IjEyMCIgeTI9IjE4MCIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjAuNSIvPgogICAgPGxpbmUgeDE9IjE1MCIgeTE9IjAiIHgyPSIxNTAiIHkyPSIxODAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICA8L2c+CgogIDwhLS0g5aSW5ZGo44Oq44Oz44KwICjjgrfjgqLjg7MpIC0tPgogIDxjaXJjbGUgY3g9IjkwIiBjeT0iOTAiIHI9IjgwIiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjY3lhbl9ncmFkKSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG9wYWNpdHk9IjAuMyIvPgoKICA8IS0tIENBTuazouW9ouODqeOCpOODsyAo5LiL6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIGZpbHRlcj0idXJsKCNnbG93X2MpIiBvcGFjaXR5PSIwLjU1Ij4KICAgIDxwb2x5bGluZSBwb2ludHM9IjEwLDE0OCAxMCwxMzggMzUsMTM4IDM1LDE1OCA2MCwxNTggNjAsMTM4IDg1LDEzOCA4NSwxNTggMTEwLDE1OCAxMTAsMTM4IDEzNSwxMzggMTM1LDE1OCAxNjAsMTU4IDE2MCwxNDggMTcwLDE0OCIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPC9nPgoKICA8IS0tIOOCouODiuODreOCsOazouW9oiAo5LiK6YOo44OH44Kz44Os44O844K344On44OzKSAtLT4KICA8ZyBjbGlwLXBhdGg9InVybCgjcm91bmRfY2xpcCkiIG9wYWNpdHk9IjAuMjUiPgogICAgPHBhdGggZD0iTTEwLDMyIFEyNSwyMiA0MCwzMiBRNTUsNDIgNzAsMzIgUTg1LDIyIDEwMCwzMiBRMTE1LDQyIDEzMCwzMiBRMTQ1LDIyIDE3MCwzMiIKICAgICAgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDwvZz4KCiAgPCEtLSBJL08g44OG44Kt44K544OIICjjgqrjg6zjg7PjgrgpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSI4NCIgZm9udC1zaXplPSI0NiIgZmlsbD0idXJsKCNvcmFuZ2VfZ3JhZCkiCiAgICB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwgQmxhY2ssc2Fucy1zZXJpZiIKICAgIGZvbnQtd2VpZ2h0PSI5MDAiIGxldHRlci1zcGFjaW5nPSItMSIgZmlsdGVyPSJ1cmwoI2dsb3dfbykiPkkvTzwvdGV4dD4KCiAgPCEtLSDljLrliIfjgorjg6njgqTjg7MgLS0+CiAgPGxpbmUgeDE9IjQwIiB5MT0iOTQiIHgyPSIxNDAiIHkyPSI5NCIgc3Ryb2tlPSJ1cmwoI2N5YW5fZ3JhZCkiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjYiLz4KCiAgPCEtLSBDQU4g44OG44Kt44K544OIICjjgrfjgqLjg7MpIC0tPgogIDx0ZXh0IHg9IjkwIiB5PSIxMzIiIGZvbnQtc2l6ZT0iNDYiIGZpbGw9InVybCgjY3lhbl9ncmFkKSIKICAgIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjayxzYW5zLXNlcmlmIgogICAgZm9udC13ZWlnaHQ9IjkwMCIgbGV0dGVyLXNwYWNpbmc9IjQiIGZpbHRlcj0idXJsKCNnbG93X2MpIj5DQU48L3RleHQ+CgogIDwhLS0g44Kz44O844OK44O844OJ44OD44OIICjlm57ot6/jg5Hjg4Pjg4npoqgpIC0tPgogIDxnIG9wYWNpdHk9IjAuNCI+CiAgICA8Y2lyY2xlIGN4PSIyMiIgY3k9IjIyIiByPSIzIiBmaWxsPSIjMDBlNWZmIi8+CiAgICA8Y2lyY2xlIGN4PSIxNTgiIGN5PSIyMiIgcj0iMyIgZmlsbD0iIzAwZTVmZiIvPgogICAgPGNpcmNsZSBjeD0iMjIiIGN5PSIxNTgiIHI9IjMiIGZpbGw9IiNmZjg4MDAiLz4KICAgIDxjaXJjbGUgY3g9IjE1OCIgY3k9IjE1OCIgcj0iMyIgZmlsbD0iI2ZmODgwMCIvPgogIDwvZz4KCiAgPCEtLSDmjqXntprjg6njgqTjg7MgKOOCs+ODvOODiuODvOODieODg+ODiOOBi+OCiSkgLS0+CiAgPGcgb3BhY2l0eT0iMC4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSIyMiIgeTI9IjQwIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMjIiIHgyPSI0MCIgeTI9IjIyIiBzdHJva2U9IiMwMGU1ZmYiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjIyIiB4Mj0iMTU4IiB5Mj0iNDAiIHN0cm9rZT0iIzAwZTVmZiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMjIiIHgyPSIxNDAiIHkyPSIyMiIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjEiLz4KICAgIDxsaW5lIHgxPSIyMiIgeTE9IjE1OCIgeDI9IjIyIiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjIyIiB5MT0iMTU4IiB4Mj0iNDAiIHkyPSIxNTgiIHN0cm9rZT0iI2ZmODgwMCIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgICA8bGluZSB4MT0iMTU4IiB5MT0iMTU4IiB4Mj0iMTU4IiB5Mj0iMTQwIiBzdHJva2U9IiNmZjg4MDAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPGxpbmUgeDE9IjE1OCIgeTE9IjE1OCIgeDI9IjE0MCIgeTI9IjE1OCIgc3Ryb2tlPSIjZmY4ODAwIiBzdHJva2Utd2lkdGg9IjEiLz4KICA8L2c+Cjwvc3ZnPg==">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23081828'/%3E%3Cstop offset='1' stop-color='%23030a12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='32' fill='url(%23g)'/%3E%3Ccircle cx='90' cy='90' r='72' fill='none' stroke='%2300e5ff' stroke-width='3' opacity='0.3'/%3E%3Ccircle cx='90' cy='90' r='55' fill='none' stroke='%2300e5ff' stroke-width='1.5' opacity='0.15'/%3E%3Ctext x='90' y='80' font-size='28' fill='%23ff8800' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='2'%3EI/O%3C/text%3E%3Ctext x='90' y='112' font-size='28' fill='%2300e5ff' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900' letter-spacing='3'%3ECAN%3C/text%3E%3Cline x1='50' y1='92' x2='130' y2='92' stroke='%2300e5ff' stroke-width='1.5' opacity='0.5'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzA2MTIyMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwMjA4MTAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImN5YW5fZ3JhZCIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMDA5OWNjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzAwZTVmZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ib3JhbmdlX2dyYWQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIwIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmNjYwMCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmZmFhMDAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8ZmlsdGVyIGlkPSJnbG93X2MiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIzIiByZXN1bHQ9ImIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJiIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgICA8ZmlsdGVyIGlkPSJnbG93X28iPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyLjUiIHJlc3VsdD0iYiIvPgogICAgICA8ZmVNZXJnZT48ZmVNZXJnZU5vZGUgaW49ImIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+CiAgICA8L2ZpbHRlcj4KICAgIDxjbGlwUGF0aCBpZD0icm91bmRfY2xpcCI+CiAgICAgIDxyZWN0IHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iMzYiLz4KICAgIDwvY2xpcFBhdGg+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iMzYiIGZpbGw9InVybCgjYmcpIi8+CiAgPHRleHQgeD0iOTAiIHk9Ijg0IiBmb250LXNpemU9IjQ2IiBmaWxsPSJ1cmwoI29yYW5nZV9ncmFkKSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIEJsYWNrLHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI5MDAiPkkvTzwvdGV4dD4KICA8dGV4dCB4PSI5MCIgeT0iMTMyIiBmb250LXNpemU9IjQ2IiBmaWxsPSJ1cmwoI2N5YW5fZ3JhZCkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjayxzYW5zLXNlcmlmIiBmb250LXdlaWdodD0iOTAwIj5DQU48L3RleHQ+Cjwvc3ZnPg==">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23081828'/%3E%3Cstop offset='1' stop-color='%23030a12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='32' fill='url(%23g)'/%3E%3Ctext x='90' y='80' font-size='28' fill='%23ff8800' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900'%3EI/O%3C/text%3E%3Ctext x='90' y='112' font-size='28' fill='%2300e5ff' text-anchor='middle' font-family='Arial Black,sans-serif' font-weight='900'%3ECAN%3C/text%3E%3C/svg%3E">
 </head>
 <body>
 <div id="restart-overlay">
@@ -508,7 +484,6 @@ html, body {
 </div>
 <div id="app">
 
-  <!-- TOPBAR -->
   <div id="topbar">
     <div class="t-title">I/O CAN</div>
     <div class="t-spacer"></div>
@@ -520,7 +495,6 @@ html, body {
     </div>
   </div>
 
-  <!-- CONNECT OVERLAY -->
   <div id="connect-overlay">
     <div class="co-logo">I/O CAN</div>
     <div class="co-sub">ATOMS3R · EXT.I/O2 · CAN CONVERTER v2</div>
@@ -536,17 +510,13 @@ html, body {
     </div>
   </div>
 
-  <!-- CONTENT -->
   <div id="content">
 
-    <!-- ── GAUGE VIEW ────────────────── -->
     <div id="view-gauge" class="view active">
       <div id="gauge-grid"></div>
     </div>
 
-    <!-- ── KEYPAD VIEW ───────────────── -->
     <div id="view-keypad" class="view">
-      <!-- CAN RX ステータスバー -->
       <div id="rx-statusbar" class="rx-statusbar">
         <span class="rx-sb-label">CAN RX</span>
         <span id="rx-sb-ind" class="rx-sb-ind">待機中</span>
@@ -560,7 +530,6 @@ html, body {
       <div id="keypad-grid"></div>
     </div>
 
-    <!-- ── SETTINGS VIEW ─────────────── -->
     <div id="view-settings" class="view">
       <div class="s-hdr">
         <div class="s-hdr-title">SETTINGS</div>
@@ -568,7 +537,6 @@ html, body {
           style="font-size:0.85rem;color:var(--err);display:none;">切断</button>
       </div>
 
-      <!-- ADC CAN TX ID -->
       <div class="s-sec">
         <div class="s-sec-title">ADC CAN TX ID</div>
         <div class="aux-rxid-inputs">
@@ -584,7 +552,6 @@ html, body {
         <div class="id-note">Frame1: TxID, Frame2: TxID+1 (各4ch 2byteLE)</div>
       </div>
 
-      <!-- SW CAN TX ID -->
       <div class="s-sec">
         <div class="s-sec-title">SWITCH CAN TX ID</div>
         <div class="aux-rxid-inputs">
@@ -600,7 +567,6 @@ html, body {
         <div class="id-note">AUX Keypadの状態を1フレームで送信 (8バイト)</div>
       </div>
 
-      <!-- CAN BAUDRATE -->
       <div class="s-sec">
         <div class="s-sec-title">CAN ボーレート</div>
         <div class="id-row" style="gap:6px;flex-wrap:wrap;">
@@ -612,7 +578,6 @@ html, body {
         <div class="id-note">変更後CAN自動再起動。デフォルト: 1Mbps</div>
       </div>
 
-      <!-- ADC ENDIAN -->
       <div class="s-sec">
         <div class="s-sec-title">ADC CAN エンディアン</div>
         <div class="aux-mode-row">
@@ -624,8 +589,6 @@ html, body {
         <div class="id-note">LE: [val&0xFF, val>>8]　BE: [val>>8, val&0xFF]</div>
       </div>
 
-
-      <!-- PIN MODES -->
       <div class="s-sec">
         <div class="s-sec-title">PIN MODE</div>
         <div class="pin-grid" id="pin-grid"></div>
@@ -633,7 +596,6 @@ html, body {
         <button class="save-btn-full" onclick="confirmPinModeSet()" style="margin-top:8px;">📡 ピンモードSET &amp; 再起動</button>
       </div>
 
-      <!-- AUX CTRL MODE + 条件パネル -->
       <div class="s-sec">
         <div class="s-sec-title">AUX 制御モード</div>
         <div class="aux-mode-row">
@@ -643,7 +605,6 @@ html, body {
           </select>
         </div>
 
-        <!-- Keypadモード: ボタン設定パネル -->
         <div id="aux-panel-keypad" class="aux-panel">
           <div class="aux-panel-title">📱 Keypad ボタン設定</div>
           <div class="kp-cfg-list" id="kp-cfg-list">
@@ -651,7 +612,6 @@ html, body {
           </div>
         </div>
 
-        <!-- CAN RXモード: 受信ID＋ON/OFF値設定パネル -->
         <div id="aux-panel-canrx" class="aux-panel" style="display:none;">
           <div class="aux-panel-title">📡 CAN RX 受信設定</div>
           <div class="aux-rxid-row">
@@ -672,12 +632,10 @@ html, body {
         </div>
       </div>
 
-      <!-- COEFF -->
       <div class="s-sec">
         <div class="s-sec-title">ADC 表示係数</div>
         <div class="coeff-ch-bar" id="coeff-ch-bar"></div>
 
-        <!-- 分圧抵抗補正 -->
         <div class="div-box">
           <div class="div-box-title">⚡ 分圧抵抗補正 <span style="font-size:0.68rem;color:var(--txt2);font-weight:400;">(未使用時は0)</span></div>
           <div class="div-row">
@@ -710,7 +668,6 @@ html, body {
           </div>
         </div>
 
-        <!-- ユーザー係数 (分圧補正後の値に適用) -->
         <div class="coeff-form">
           <div class="cf-field"><label>ラベル</label><input type="text"   id="cf-lbl" placeholder="CH 0"></div>
           <div class="cf-field"><label>単位</label>  <input type="text"   id="cf-unit" placeholder="V"></div>
@@ -733,32 +690,27 @@ html, body {
         <button class="save-btn-full" onclick="saveCoeff()">💾 保存</button>
       </div>
 
-      <!-- LOG -->
       <div class="s-sec">
         <div class="s-sec-title">通信ログ</div>
         <div id="s-log"></div>
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /app -->
+  </div>
+</div>
 
 <script>
-// ════════════════════════════════════════════
-// CONSTANTS & STATE
-// ════════════════════════════════════════════
 const NUM_CH = 8;
 const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify
-const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write
+const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 
 let bleDevice, bleServer, txChar, rxChar;
 let isConnected = false;
 
-// Device state (synced from NVS on connect)
 let adcRaw   = Array(NUM_CH).fill(0);
-let swVals   = Array(NUM_CH).fill(0);    // current CAN byte value per pin
-let swSrc    = Array(NUM_CH).fill('');   // 'ble' or 'can' - 最終変化元
+let swVals   = Array(NUM_CH).fill(0);
+let swSrc    = Array(NUM_CH).fill('');
 let rxIndTimer = null;
 let pinModes = JSON.parse(localStorage.getItem("ana_pinModes")  || "null") || Array(NUM_CH).fill(1);
 let swOnVals = JSON.parse(localStorage.getItem("ana_swOnVals")  || "null") || Array(NUM_CH).fill(1);
@@ -766,36 +718,30 @@ let swOffVals= JSON.parse(localStorage.getItem("ana_swOffVals") || "null") || Ar
 let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
 let swTxId   = localStorage.getItem("ana_swTxId")  || "5A0";
 let rxCanId  = localStorage.getItem("ana_rxCanId")  || "600";
-let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0"); // 0=LE 1=BE
+let canEndian= parseInt(localStorage.getItem("ana_canEndian")||"0");
 let canBaud  = parseInt(localStorage.getItem("ana_canBaud")||"1000000");
 let rxOnVals    = JSON.parse(localStorage.getItem("ana_rxOnVals")  || "null") || Array(NUM_CH).fill(1);
 let rxOffVals   = JSON.parse(localStorage.getItem("ana_rxOffVals") || "null") || Array(NUM_CH).fill(0);
-let auxCtrlMode = parseInt(localStorage.getItem("ana_auxCtrlMode") || "0"); // 0=Keypad 1=CAN RX
-let pendingPinModes = null;  // 保留中のピンモード変更
+let auxCtrlMode = parseInt(localStorage.getItem("ana_auxCtrlMode") || "0");
+let pendingPinModes = null;
 
-// Button metadata (label/mode per pin, stored locally)
 function loadBtnMeta() {
   const d = localStorage.getItem("ana_btnMeta");
   if (d) try { return JSON.parse(d); } catch(e) {}
-  return Array.from({length:NUM_CH}, (_,i) => ({
-    label: `SW${i}`,
-    mode:  "toggle"  // toggle | momentary
-  }));
+  return Array.from({length:NUM_CH}, (_,i) => ({ label: `SW${i}`, mode: "toggle" }));
 }
 let btnMeta = loadBtnMeta();
 function saveBtnMeta() { localStorage.setItem("ana_btnMeta", JSON.stringify(btnMeta)); }
 
-// Coefficient settings (INPUT only)
 function defaultCoeff(i) {
   return {
     label: `CH${i}`, unit: "V",
     mul: 1.0, add: 0, min: 0, max: 5, dec: 2,
     color: ["#00e5ff","#00ff88","#ff6b00","#ffcc00","#ff3355","#cc88ff","#88ddff","#ffaa44"][i],
-    r1: 0, r2: 0   // 分圧抵抗 Ω (0=未使用)
+    r1: 0, r2: 0
   };
 }
 
-// 計算チェーン:  raw → ×(3.3/4095) → ×divCorr → ×mul → +add
 function calcDisplayVal(ch, raw) {
   const c = coeffs[ch];
   const adcVolt  = raw * (3.3 / 4095);
@@ -827,34 +773,16 @@ let currentView = "gauge";
 // BLE
 // ════════════════════════════════════════════
 async function startConnect() {
-  // ① Web Bluetooth 対応チェック
   if (!navigator.bluetooth) {
-    alert(
-      "⚠️ Web Bluetooth が使えません\n\n" +
-      "必要な環境:\n" +
-      "・Chrome (PC / Android)  ← 推奨\n" +
-      "・Safari iOS 16+\n\n" +
-      "NG な環境:\n" +
-      "・Firefox (非対応)\n" +
-      "・file:// 直接開き (HTTPSが必要)\n\n" +
-      "→ ChromeでHTTPS URLから開いてください"
-    );
+    alert("⚠️ Web Bluetooth が使えません\n\nChrome (PC/Android) でHTTPS URLから開いてください");
     return;
   }
-  // ② HTTPS / localhost チェック
   if (location.protocol === "file:") {
-    alert(
-      "⚠️ file:// では Web Bluetooth は動作しません\n\n" +
-      "解決方法:\n" +
-      "① HTTPS サーバー経由でアクセス\n" +
-      "② ATOMS3R の Wi-Fi AP + Webサーバー\n" +
-      "③ ngrok 等でHTTPS化"
-    );
+    alert("⚠️ file:// では Web Bluetooth は動作しません\n\nHTTPS サーバー経由でアクセスしてください");
     return;
   }
   log("🔍 デバイス検索中... (M5S3R_AnaCAN)");
   try {
-    log("スキャン中...");
     bleDevice = await navigator.bluetooth.requestDevice({
       filters: [{ name: "M5S3R_AnaCAN" }],
       optionalServices: [SERVICE_UUID]
@@ -874,23 +802,18 @@ async function startConnect() {
     const msg = e.message || String(e);
     if (msg.includes("User cancelled") || msg.includes("cancelled")) {
       log("ℹ️ キャンセルされました");
-    } else if (msg.includes("not found") || msg.includes("no devices")) {
-      log("❌ デバイスが見つかりません");
-      log("   → ATOMS3RのLEDが点滅しているか確認");
-      log("   → main.py が起動しているか確認");
-      log("   → スマホのBluetooth ON を確認");
     } else {
       log("❌ 接続エラー: " + msg);
     }
   }
 }
 
+// ★ 修正①: settingsビュー例外を削除 → 常にコネクト画面へ
+//           再起動オーバーレイが表示中なら閉じてから遷移
 function onDisconnected() {
   setConnected(false);
-  // settings ビューにいる場合はオーバーレイを出さない (設定は常にアクセス可)
-  if (currentView !== "settings") {
-    document.getElementById("connect-overlay").style.display = "flex";
-  }
+  document.getElementById('restart-overlay').classList.remove('show');
+  document.getElementById("connect-overlay").style.display = "flex";
   log("切断");
 }
 
@@ -921,7 +844,6 @@ function onNotify(ev) {
 }
 
 function parseMsg(msg) {
-  // CFG1パケット: 設定値一括受信
   if (msg.startsWith("CFG1=")) {
     msg.slice(5).split("|").forEach(part => {
       if (part.startsWith("LOG="))      log("📡 " + part.slice(4));
@@ -933,7 +855,6 @@ function parseMsg(msg) {
       else if (part.startsWith("BAUD="))    { canBaud = parseInt(part.slice(5)); localStorage.setItem("ana_canBaud",canBaud); updateBaudUI(); }
     }); return;
   }
-  // CFG2パケット: ピン設定一括受信
   if (msg.startsWith("CFG2=")) {
     msg.slice(5).split("|").forEach(part => {
       if (part.startsWith("PIN_MODES=")) {
@@ -958,7 +879,6 @@ function parseMsg(msg) {
     }); return;
   }
 
-  // 複合パケット "AVALS=...|SW=...|ST=..." を分解して個別処理
   if (msg.includes("|SW=")) {
     msg.split("|").forEach(part => {
       if (part.startsWith("AVALS="))
@@ -988,8 +908,7 @@ function parseMsg(msg) {
   }
   if (msg.startsWith("SW_ON=")) {
     msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) swOnVals[i] = parseInt(v)||0; });
-    localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
-    return;
+    localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals)); return;
   }
   if (msg.startsWith("SW_OFF=")) {
     msg.slice(7).split(',').forEach((v,i) => { if (i<NUM_CH) swOffVals[i] = parseInt(v)||0; });
@@ -1000,17 +919,13 @@ function parseMsg(msg) {
     adcTxId = msg.slice(5).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_adcTxId", adcTxId);
     const d=document.getElementById('adc-txid-dec'); if(d) d.value=parseInt(adcTxId,16);
-    const h=document.getElementById('adc-txid-hex'); if(h) h.value=adcTxId;
-    const _a=document.getElementById("adc-txid-dec"); if(_a) _a.value=parseInt(adcTxId,16);
-    const _b=document.getElementById("adc-txid-hex"); if(_b) _b.value=adcTxId; return;
+    const h=document.getElementById('adc-txid-hex'); if(h) h.value=adcTxId; return;
   }
   if (msg.startsWith("SW_TXID=")) {
     swTxId = msg.slice(8).replace(/0x/i,'').toUpperCase();
     localStorage.setItem("ana_swTxId", swTxId);
     const d=document.getElementById('sw-txid-dec'); if(d) d.value=parseInt(swTxId,16);
-    const h=document.getElementById('sw-txid-hex'); if(h) h.value=swTxId;
-    const _c=document.getElementById("sw-txid-dec"); if(_c) _c.value=parseInt(swTxId,16);
-    const _d=document.getElementById("sw-txid-hex"); if(_d) _d.value=swTxId; return;
+    const h=document.getElementById('sw-txid-hex'); if(h) h.value=swTxId; return;
   }
   if (msg.startsWith("STATUS=")) {
     const ok = msg === "STATUS=CAN_OK";
@@ -1056,9 +971,11 @@ function parseMsg(msg) {
     localStorage.setItem("ana_auxCtrlMode", auxCtrlMode);
     updateAuxModeUI(); return;
   }
+  // ★ 修正②③: RESTARTING受信 → showRestartingOverlay内でBLE強制切断
   if (msg === "RESTARTING") {
     log("🔄 デバイス再起動中...");
-    showRestartingOverlay(); return;
+    showRestartingOverlay();
+    return;
   }
   if (msg === "SW_LOCK=CAN" || msg === "SW_LOCK=CANRX") {
     const lock = document.getElementById('rx-sb-lock');
@@ -1066,7 +983,6 @@ function parseMsg(msg) {
     log("⚠ CAN RXモード: Keypad無効"); return;
   }
   if (msg.startsWith("RX_ACT=")) {
-    // CAN RXによるAUX変化通知
     const vals = msg.slice(7).split(',').map(v=>parseInt(v)||0);
     vals.forEach((v,i) => { if(i<NUM_CH) swSrc[i] = 'can'; });
     showRxIndicator(vals);
@@ -1087,27 +1003,18 @@ function showView(v) {
     const tEl = document.getElementById("tab-"+(n==="settings"?"cfg":n));
     if (tEl) tEl.classList.toggle("active", n===v);
   });
-  if (v === "gauge") {
-    // settingsから戻るとCanvasサイズが0になるため再計算
-    requestAnimationFrame(() => { sizeCanvases(); });
-  }
+  if (v === "gauge") requestAnimationFrame(() => { sizeCanvases(); });
   if (v === "settings") {
-    updateBaudUI();
-    updateEndianUI();
-    updateAuxModeUI();
-    // ADC TX ID
+    updateBaudUI(); updateEndianUI(); updateAuxModeUI();
     const adcDecEl = document.getElementById('adc-txid-dec');
     const adcHexEl = document.getElementById('adc-txid-hex');
     if (adcDecEl) adcDecEl.value = parseInt(adcTxId,16);
     if (adcHexEl) adcHexEl.value = adcTxId.toUpperCase();
-    // SW TX ID
     const swDecEl = document.getElementById('sw-txid-dec');
     const swHexEl = document.getElementById('sw-txid-hex');
     if (swDecEl) swDecEl.value = parseInt(swTxId,16);
     if (swHexEl) swHexEl.value = swTxId.toUpperCase();
-    renderPinGrid();
-    renderCoeffChBar();
-    loadCoeffForm();
+    renderPinGrid(); renderCoeffChBar(); loadCoeffForm();
   }
 }
 
@@ -1121,8 +1028,7 @@ function showRxIndicator(vals) {
   const onPins  = vals.map((v,i)=>pinModes[i]===0 && v===swOnVals[i]  ? 'P'+i+':ON'  : null).filter(Boolean);
   const offPins = vals.map((v,i)=>pinModes[i]===0 && v===swOffVals[i] ? 'P'+i+':OFF' : null).filter(Boolean);
   const parts = [...onPins, ...offPins];
-  const txt = parts.length ? parts.join('  ') : 'ACT';
-  ind.textContent = txt;
+  ind.textContent = parts.length ? parts.join('  ') : 'ACT';
   ind.classList.remove('active');
   void ind.offsetWidth;
   ind.classList.add('active');
@@ -1136,12 +1042,9 @@ function showRxIndicator(vals) {
   log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
 }
 
-// ── ピンモード SET & 再起動 ──
 function confirmPinModeSet() {
   const changes = [];
-  for (let i=0; i<NUM_CH; i++) {
-    changes.push('P'+i+':'+(pinModes[i]===1?'INPUT':'AUX'));
-  }
+  for (let i=0; i<NUM_CH; i++) changes.push('P'+i+':'+(pinModes[i]===1?'INPUT':'AUX'));
   document.getElementById('cd-msg').innerHTML =
     'ピンモードを更新し、デバイスを再起動します。<br>' +
     '<span style="font-size:0.75rem;color:#aaa;">' + changes.join('  ') + '</span><br><br>よろしいですか？';
@@ -1158,15 +1061,23 @@ function executePinModeSet() {
   localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
   setTimeout(showRestartingOverlay, 200);
 }
+
+// ★ 修正②: BLE強制切断 → onDisconnected() 経由でコネクト画面表示
 function showRestartingOverlay() {
   document.getElementById('restart-overlay').classList.add('show');
-  // 10秒後に自動で閉じる(再接続を促す)
   setTimeout(() => {
-    document.getElementById('restart-overlay').classList.remove('show');
-  }, 10000);
+    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+      // BLE切断 → gattserverdisconnected → onDisconnected() → コネクト画面表示
+      bleDevice.gatt.disconnect();
+    } else {
+      // 既に切断済み(デバイス側が先に切断した場合)のフォールバック
+      document.getElementById('restart-overlay').classList.remove('show');
+      setConnected(false);
+      document.getElementById("connect-overlay").style.display = "flex";
+    }
+  }, 1500);
 }
 
-// ── AUX制御モード ──
 function setAuxMode(v) {
   auxCtrlMode = v;
   localStorage.setItem('ana_auxCtrlMode', v);
@@ -1175,18 +1086,14 @@ function setAuxMode(v) {
   log('→ AUX MODE: ' + (v===0 ? 'Keypad' : 'CAN RX'));
 }
 function updateAuxModeUI() {
-  // プルダウン同期
   const sel = document.getElementById('aux-mode-sel');
   if (sel) sel.value = String(auxCtrlMode);
-  // パネル切替
   const pkp = document.getElementById('aux-panel-keypad');
   const pcr = document.getElementById('aux-panel-canrx');
   if (pkp) pkp.style.display = auxCtrlMode===0 ? '' : 'none';
   if (pcr) pcr.style.display = auxCtrlMode===1 ? '' : 'none';
-  // Keypadビューのグレーアウト
   const kpView = document.getElementById('view-keypad');
   if (kpView) kpView.classList.toggle('canrx-mode', auxCtrlMode===1);
-  // RX設定パネル更新
   if (auxCtrlMode===1) {
     const decEl = document.getElementById('rx-canid-dec');
     const hexEl = document.getElementById('rx-canid-hex');
@@ -1198,7 +1105,6 @@ function updateAuxModeUI() {
   }
 }
 
-// ── Dec/Hex 双方向同期ヘルパー ──
 function syncHex(decId, hexId) {
   const el = document.getElementById(decId);
   const hexEl = document.getElementById(hexId);
@@ -1213,9 +1119,9 @@ function syncDec(hexId, decId) {
   if (!isNaN(v)) document.getElementById(decId).value = v;
 }
 function setRxCanIdNew() {
-  const dec = parseInt(document.getElementById('rx-canid-dec').value);
-  if (isNaN(dec) || dec<0 || dec>2047) return;
-  const hexStr = dec.toString(16).toUpperCase().padStart(3,'0');
+  const d = parseInt(document.getElementById('rx-canid-dec').value);
+  if (isNaN(d) || d<0 || d>2047) return;
+  const hexStr = d.toString(16).toUpperCase().padStart(3,'0');
   rxCanId = hexStr;
   localStorage.setItem("ana_rxCanId", rxCanId);
   document.getElementById('rx-canid-hex').value = hexStr;
@@ -1244,7 +1150,6 @@ function updateEndianUI() {
   const sel = document.getElementById("endian-sel");
   if (sel) sel.value = String(canEndian);
 }
-// setRxCanId: 旧関数(後方互換用、setRxCanIdNew に統合済み)
 function setRxCanId() { setRxCanIdNew(); }
 function renderRxCfgList() {
   const list = document.getElementById("rx-cfg-list"); if (!list) return;
@@ -1297,17 +1202,17 @@ function setRxVal(pin) {
 }
 
 function setAdcTxId() {
-  const dec = parseInt(document.getElementById('adc-txid-dec').value);
-  if (isNaN(dec) || dec<0 || dec>2047) return;
-  const h = dec.toString(16).toUpperCase().padStart(3,'0');
+  const d = parseInt(document.getElementById('adc-txid-dec').value);
+  if (isNaN(d) || d<0 || d>2047) return;
+  const h = d.toString(16).toUpperCase().padStart(3,'0');
   document.getElementById('adc-txid-hex').value = h;
   adcTxId = h; localStorage.setItem("ana_adcTxId", h);
   send("SET_TXID=0x"+h); log("→ SET_TXID=0x"+h);
 }
 function setSwTxId() {
-  const dec = parseInt(document.getElementById('sw-txid-dec').value);
-  if (isNaN(dec) || dec>2047) return;
-  const h = dec.toString(16).toUpperCase().padStart(3,'0');
+  const d = parseInt(document.getElementById('sw-txid-dec').value);
+  if (isNaN(d) || d>2047) return;
+  const h = d.toString(16).toUpperCase().padStart(3,'0');
   document.getElementById('sw-txid-hex').value = h;
   swTxId = h; localStorage.setItem("ana_swTxId", h);
   send("SW_TXID=0x"+h); log("→ SW_TXID=0x"+h);
@@ -1328,7 +1233,6 @@ function renderPinGrid() {
 function togglePin(i) {
   pinModes[i] = pinModes[i]===1 ? 0 : 1;
   applyPinModesUI();
-  // ※ SET & 再起動ボタンで確定
 }
 
 function applyPinModesUI() {
@@ -1336,24 +1240,21 @@ function applyPinModesUI() {
   requestAnimationFrame(() => { sizeCanvases(); updateAllAuxBtns(); });
   renderPinGrid();
   renderCoeffChBar();
-  // 現在のAUXモードに合わせて設定リストを即時更新
   if (auxCtrlMode === 1) renderRxCfgList();
   else renderKeypadCfgList();
 }
 
 // ════════════════════════════════════════════
-// KEYPAD CONFIG (AUX pins)
+// KEYPAD CONFIG
 // ════════════════════════════════════════════
 function renderKeypadCfgList() {
   const list = document.getElementById("kp-cfg-list"); list.innerHTML = "";
   const auxPins = [];
   for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
-
   if (auxPins.length === 0) {
     list.innerHTML = '<div style="color:var(--txt2);font-size:0.8rem;">AUXピンがありません</div>';
     return;
   }
-
   auxPins.forEach(pin => {
     const meta = btnMeta[pin];
     const row = document.createElement("div");
@@ -1419,25 +1320,20 @@ function saveBtnCfg(pin) {
 function renderKeypad() {
   const auxPins = [];
   for (let i=0; i<NUM_CH; i++) if (pinModes[i]===0) auxPins.push(i);
-
   const empty = document.getElementById("keypad-empty");
   const grid  = document.getElementById("keypad-grid");
-
   if (auxPins.length === 0) {
     empty.style.display = "flex";
     grid.classList.remove("visible"); grid.innerHTML = ""; return;
   }
   empty.style.display = "none";
   grid.innerHTML = "";
-
-  // Determine grid layout
   const n = auxPins.length;
   const cols = n <= 2 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : 4;
   const rows = Math.ceil(n / cols);
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   grid.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
   grid.classList.add("visible");
-
   auxPins.forEach(pin => {
     const meta  = btnMeta[pin];
     const isOn  = swVals[pin] === swOnVals[pin];
@@ -1463,13 +1359,9 @@ let holdTimers = {};
 function handleBtnDown(pin) {
   const btn = document.getElementById(`kp-${pin}`);
   if (btn) btn.classList.add("pressing");
-
   const meta = btnMeta[pin];
-  if (meta.mode === "momentary") {
-    triggerPulse(pin);
-  } else {
-    executeToggle(pin);
-  }
+  if (meta.mode === "momentary") triggerPulse(pin);
+  else executeToggle(pin);
 }
 
 function handleBtnUp(pin) {
@@ -1493,7 +1385,6 @@ function triggerPulse(pin) {
   send(`SW_SET=${pin},${swOnVals[pin]}`);
   renderKeypad();
   vibrate(20);
-  // momentary flash animation
   const btn = document.getElementById(`kp-${pin}`);
   if (btn) { btn.classList.add("momentary-flash"); setTimeout(()=>btn.classList.remove("momentary-flash"),450); }
   setTimeout(() => {
@@ -1506,7 +1397,7 @@ function triggerPulse(pin) {
 function vibrate(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
 
 // ════════════════════════════════════════════
-// GAUGE RENDER (Canvas arc)
+// GAUGE RENDER
 // ════════════════════════════════════════════
 function buildGaugeGrid() {
   const g = document.getElementById("gauge-grid"); g.innerHTML = "";
@@ -1514,10 +1405,8 @@ function buildGaugeGrid() {
     const cell = document.createElement("div");
     cell.id = `gc-${i}`;
     if (pinModes[i] === 0) {
-      // AUXピン → ボタンセル
       _buildAuxCell(cell, i);
     } else {
-      // INPUTピン → ゲージセル
       cell.className = "gauge-cell";
       const cvs = document.createElement("canvas");
       cvs.id = `gcv-${i}`;
@@ -1605,11 +1494,9 @@ function drawGauge(ch) {
   const pct  = Math.max(0, Math.min(1, (val-c.min)/(c.max-c.min)));
   const vA   = A0 + pct*(A1-A0);
 
-  // BG arc
   ctx.beginPath(); ctx.arc(cx,cy,r,A0,A1);
   ctx.strokeStyle="#1a2535"; ctx.lineWidth=lw; ctx.lineCap="butt"; ctx.stroke();
 
-  // Tick marks
   for (let t=0;t<=5;t++) {
     const ta=A0+(t/5)*(A1-A0);
     const x1=cx+Math.cos(ta)*(r-lw*.5), y1=cy+Math.sin(ta)*(r-lw*.5);
@@ -1618,37 +1505,31 @@ function drawGauge(ch) {
     ctx.strokeStyle="#263040"; ctx.lineWidth=dpr; ctx.stroke();
   }
 
-  // Value arc
   if (pct>0.001) {
     const g2=ctx.createLinearGradient(cx-r,cy,cx+r,cy);
     g2.addColorStop(0,hexAlpha(c.color,.4)); g2.addColorStop(1,c.color);
     ctx.beginPath(); ctx.arc(cx,cy,r,A0,vA);
     ctx.strokeStyle=g2; ctx.lineWidth=lw; ctx.lineCap="butt"; ctx.stroke();
-    // tip glow
     ctx.beginPath(); ctx.arc(cx,cy,r,Math.max(A0,vA-.18),vA);
     ctx.strokeStyle=c.color; ctx.lineWidth=lw*1.2; ctx.lineCap="round";
     ctx.shadowColor=c.color; ctx.shadowBlur=lw*2; ctx.stroke(); ctx.shadowBlur=0;
   }
 
-  // Value text
   const fs=Math.round(r*.42);
   ctx.font=`bold ${fs}px 'Share Tech Mono',monospace`;
   ctx.textAlign="center"; ctx.textBaseline="middle";
   ctx.fillStyle=c.color; ctx.shadowColor=c.color; ctx.shadowBlur=fs*.4;
   ctx.fillText(val.toFixed(c.dec), cx, cy-r*.06); ctx.shadowBlur=0;
 
-  // Unit
   const ufs=Math.round(r*.19);
   ctx.font=`${ufs}px 'Share Tech Mono',monospace`;
   ctx.fillStyle="#4a5568"; ctx.fillText(c.unit, cx, cy+r*.22);
 
-  // Label
   const lfs=Math.round(r*.2);
   ctx.font=`700 ${lfs}px 'Barlow Condensed',sans-serif`;
   ctx.fillStyle="#6a7a90";
   ctx.fillText(c.label.toUpperCase(), cx, H*.09);
 
-  // Min/Max labels
   const mfs=Math.round(r*.17);
   ctx.font=`${mfs}px 'Share Tech Mono',monospace`;
   ctx.fillStyle="#2a3a50";
@@ -1657,7 +1538,6 @@ function drawGauge(ch) {
   ctx.textAlign="right"; ctx.fillText(c.min, minX, minY);
   ctx.textAlign="left";  ctx.fillText(c.max, maxX, maxY);
 
-  // Raw ADC
   ctx.font=`${Math.round(r*.15)}px 'Share Tech Mono',monospace`;
   ctx.fillStyle="#1f2a38"; ctx.textAlign="center";
   ctx.fillText(`${raw}`, cx, H*.94);
@@ -1669,10 +1549,9 @@ function hexAlpha(hex,a) {
 }
 
 // ════════════════════════════════════════════
-// COEFF SETTINGS UI
+// COEFF SETTINGS
 // ════════════════════════════════════════════
 function renderCoeffChBar() {
-  // currentCoeffChがAUXになっていたら最初のINPUTピンに補正
   if (pinModes[currentCoeffCh] === 0) {
     const firstInput = pinModes.findIndex(m => m===1);
     if (firstInput >= 0) currentCoeffCh = firstInput;
@@ -1726,13 +1605,10 @@ function updateCoeffPreview() {
   document.getElementById("cf-prev-lbl").textContent = `P${currentCoeffCh}  raw:${raw}`;
   const chainEl = document.getElementById("cf-prev-chain");
   if (chainEl) {
-    if (divCorr !== 1.0) {
-      chainEl.textContent =
-        `ADC: ${adcV.toFixed(3)}V → 補正後: ${srcV.toFixed(3)}V × ${mul} + ${add}`;
-    } else {
-      chainEl.textContent =
-        `ADC: ${adcV.toFixed(3)}V × ${mul} + ${add}`;
-    }
+    if (divCorr !== 1.0)
+      chainEl.textContent = `ADC: ${adcV.toFixed(3)}V → 補正後: ${srcV.toFixed(3)}V × ${mul} + ${add}`;
+    else
+      chainEl.textContent = `ADC: ${adcV.toFixed(3)}V × ${mul} + ${add}`;
   }
 }
 
@@ -1762,31 +1638,18 @@ function updateDivInfo() {
   const r2  = parseFloat(document.getElementById("cf-r2").value) || 0;
   const info = document.getElementById("div-info");
   if (!info) return;
-
-  if (r1 <= 0 || r2 <= 0) {
-    info.style.display = "none"; return;
-  }
-
+  if (r1 <= 0 || r2 <= 0) { info.style.display = "none"; return; }
   info.style.display = "grid";
-  const ratio    = (r1 + r2) / r2;
-  const adcMax   = (r2 / (r1 + r2)) * 3.3;   // センサー最大電圧入力時のADCピン電圧
-  // ADCが 3.3V になるときのセンサー電圧
-  const srcMax   = 3.3 * ratio;
-  const isSafe   = adcMax <= 3.35;  // 小マージン込み
-
+  const ratio  = (r1 + r2) / r2;
+  const adcMax = (r2 / (r1 + r2)) * 3.3;
+  const srcMax = 3.3 * ratio;
+  const isSafe = adcMax <= 3.35;
   document.getElementById("div-ratio").textContent  = ratio.toFixed(4);
   document.getElementById("div-adc-max").textContent = adcMax.toFixed(2) + "V";
   document.getElementById("div-src-max").textContent = srcMax.toFixed(2) + "V";
-
   const safeEl = document.getElementById("div-safe");
-  if (isSafe) {
-    safeEl.textContent = "✅ OK";
-    safeEl.style.color = "var(--ok)";
-  } else {
-    safeEl.textContent = "⚠️ NG";
-    safeEl.style.color = "var(--err)";
-  }
-
+  safeEl.textContent = isSafe ? "✅ OK" : "⚠️ NG";
+  safeEl.style.color = isSafe ? "var(--ok)" : "var(--err)";
   updateCoeffPreview();
 }
 
@@ -1802,7 +1665,6 @@ function log(msg) {
 // ════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════
-// ── 画面消灯防止 (Wake Lock API) ──
 let _wakeLock = null;
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return;
@@ -1811,13 +1673,12 @@ async function requestWakeLock() {
     _wakeLock.addEventListener('release', () => { _wakeLock = null; });
   } catch(e) {}
 }
-// 画面が再表示された時に再取得
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') requestWakeLock();
 });
 
 window.addEventListener("load", () => {
-  requestWakeLock();  // 起動時に画面消灯防止を要求
+  requestWakeLock();
   buildGaugeGrid();
   renderPinGrid();
   renderKeypad();
@@ -1827,7 +1688,6 @@ window.addEventListener("load", () => {
   window.addEventListener("resize", () => sizeCanvases());
   window.addEventListener("orientationchange", () => setTimeout(sizeCanvases,200));
 
-  // Demo animation while not connected
   let demo=0;
   const demoT=setInterval(()=>{
     if (isConnected) { clearInterval(demoT); return; }
