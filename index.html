@@ -813,12 +813,14 @@ async function startConnect() {
 // ★ 修正①: settingsビュー例外を削除 → 常にコネクト画面へ
 //           再起動オーバーレイが表示中なら閉じてから遷移
 function onDisconnected() {
-  // フォールバックタイマーをキャンセル(正常な切断イベントで処理するため)
   if (_restartFallbackTimer) { clearTimeout(_restartFallbackTimer); _restartFallbackTimer = null; }
   setConnected(false);
   document.getElementById('restart-overlay').classList.remove('show');
   document.getElementById("connect-overlay").style.display = "flex";
-  log("切断");
+  // ★ _sentPinModesはここでクリアしない
+  //    再接続後のCFG2受信時(PIN_MODES=)でクリアする
+  //    切断中もlocalStorageの値が正しく保持される
+  log("切断 (ピンモード設定保持中)");
 }
 
 async function disconnectBLE() {
@@ -862,8 +864,11 @@ function parseMsg(msg) {
   if (msg.startsWith("CFG2=")) {
     msg.slice(5).split("|").forEach(part => {
       if (part.startsWith("PIN_MODES=")) {
-        part.slice(10).split(',').forEach((v,i) => { if(i<NUM_CH) pinModes[i]=parseInt(v)||0; });
-        localStorage.setItem("ana_pinModes", JSON.stringify(pinModes)); applyPinModesUI();
+        const cfgModes = part.slice(10).split(',').map((v,i) => i<NUM_CH ? (parseInt(v)||0) : 0);
+        cfgModes.forEach((v,i) => { if(i<NUM_CH) pinModes[i] = v; });
+        localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
+        _sentPinModes = null;  // 再接続後CFG2受信でフラグクリア
+        applyPinModesUI();
       } else if (part.startsWith("SW_ON=")) {
         part.slice(6).split(',').forEach((v,i) => { if(i<NUM_CH) swOnVals[i]=parseInt(v)||0; });
         localStorage.setItem("ana_swOnVals", JSON.stringify(swOnVals));
@@ -906,9 +911,25 @@ function parseMsg(msg) {
     updateAllAuxBtns(); renderKeypad(); return;
   }
   if (msg.startsWith("PIN_MODES=")) {
-    msg.slice(10).split(',').forEach((v,i) => { if (i<NUM_CH) pinModes[i] = parseInt(v)||0; });
-    localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
-    applyPinModesUI(); return;
+    const recvModes = msg.slice(10).split(',').map((v,i) => i<NUM_CH ? (parseInt(v)||0) : 0);
+    if (_sentPinModes) {
+      // SET_ALL_PINS送信後のエコー: firmwareが送り返した値を確認ログ出力のみ
+      // 実際のpinModesは送信時に設定済みの値(_sentPinModes)を使う
+      const match = _sentPinModes.every((v,i) => v === recvModes[i]);
+      log('📥 PIN_MODES確認: ' + (match ? '✅一致' : '⚠不一致 recv=' + recvModes.join(',') + ' sent=' + _sentPinModes.join(',')));
+      if (!match) {
+        // firmwareが異なる値を返した場合は送信値を採用してUIを保持
+        log('⚠ 送信値を優先します');
+      }
+      // pinModesは既に_sentPinModesの値が入っているのでapplyPinModesUIのみ
+      applyPinModesUI();
+    } else {
+      // 通常時のPIN_MODES受信
+      recvModes.forEach((v,i) => { if(i<NUM_CH) pinModes[i] = v; });
+      localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
+      applyPinModesUI();
+    }
+    return;
   }
   if (msg.startsWith("SW_ON=")) {
     msg.slice(6).split(',').forEach((v,i) => { if (i<NUM_CH) swOnVals[i] = parseInt(v)||0; });
@@ -1057,15 +1078,19 @@ function confirmPinModeSet() {
 function closeConfirm() {
   document.getElementById('confirm-dialog').classList.remove('show');
 }
+// ★ SET_ALL_PINSで送信した意図するピンモード (再起動完了まで保持)
+let _sentPinModes = null;
+
 async function executePinModeSet() {
   closeConfirm();
   const modeStr = pinModes.join(',');
+  // 送信前に意図する値をlocalStorageと_sentPinModesに保存
+  _sentPinModes = pinModes.slice();  // コピー保存
   localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
-  // ★ await で BLE書き込み完了を保証してからオーバーレイ表示
+  log('📤 SET_ALL_PINS送信: ' + modeStr);
   await send('SET_ALL_PINS=' + modeStr);
-  log('→ SET_ALL_PINS=' + modeStr + ' (再起動待ち)');
-  // RESTARTINGメッセージ受信時にshowRestartingOverlayが呼ばれる
-  // ここでは何もしない(フォールバックタイマーは二重表示の原因になるため削除)
+  log('✅ BLE書込み完了 - RESTARTING待機中...');
+  // showRestartingOverlayはRESTARTINGメッセージ受信時のみ呼ばれる
 }
 
 // ★ machine.reset()でBLEは自然に切断される
