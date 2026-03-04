@@ -787,6 +787,8 @@ async function startConnect() {
       filters: [{ name: "M5S3R_AnaCAN" }],
       optionalServices: [SERVICE_UUID]
     });
+    // ★ removeEventListener で重複登録防止(再接続時に複数リスナーが積まれるのを防ぐ)
+    bleDevice.removeEventListener("gattserverdisconnected", onDisconnected);
     bleDevice.addEventListener("gattserverdisconnected", onDisconnected);
     bleServer = await bleDevice.gatt.connect();
     const svc = await bleServer.getPrimaryService(SERVICE_UUID);
@@ -1053,29 +1055,37 @@ function confirmPinModeSet() {
 function closeConfirm() {
   document.getElementById('confirm-dialog').classList.remove('show');
 }
-function executePinModeSet() {
+async function executePinModeSet() {
   closeConfirm();
   const modeStr = pinModes.join(',');
-  send('SET_ALL_PINS=' + modeStr);
-  log('→ SET_ALL_PINS=' + modeStr + ' (再起動)');
   localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
-  setTimeout(showRestartingOverlay, 200);
+  // ★ await で BLE書き込み完了を保証してからオーバーレイ表示
+  await send('SET_ALL_PINS=' + modeStr);
+  log('→ SET_ALL_PINS=' + modeStr + ' (再起動待ち)');
+  // showRestartingOverlay は RESTARTING メッセージ受信時に呼ぶ(二重呼び出し防止)
+  // フォールバック: 3秒待って RESTARTING が来なかった場合のみ
+  setTimeout(() => { if (!_restartingShown) showRestartingOverlay(); }, 3000);
 }
 
-// ★ 修正②: BLE強制切断 → onDisconnected() 経由でコネクト画面表示
+// ★ 二重呼び出し防止フラグ
+let _restartingShown = false;
+
 function showRestartingOverlay() {
+  if (_restartingShown) return;  // 二重呼び出し防止
+  _restartingShown = true;
   document.getElementById('restart-overlay').classList.add('show');
+  // 2秒後にBLE強制切断 → onDisconnected() 経由でコネクト画面表示
   setTimeout(() => {
     if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
-      // BLE切断 → gattserverdisconnected → onDisconnected() → コネクト画面表示
       bleDevice.gatt.disconnect();
     } else {
-      // 既に切断済み(デバイス側が先に切断した場合)のフォールバック
+      // 既に切断済みのフォールバック
       document.getElementById('restart-overlay').classList.remove('show');
       setConnected(false);
       document.getElementById("connect-overlay").style.display = "flex";
     }
-  }, 1500);
+    _restartingShown = false;  // 次回のためにリセット
+  }, 2000);
 }
 
 function setAuxMode(v) {
