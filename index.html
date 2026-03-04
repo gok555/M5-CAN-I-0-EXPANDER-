@@ -712,7 +712,20 @@ let adcRaw   = Array(NUM_CH).fill(0);
 let swVals   = Array(NUM_CH).fill(0);
 let swSrc    = Array(NUM_CH).fill('');
 let rxIndTimer = null;
-let pinModes = JSON.parse(localStorage.getItem("ana_pinModes")  || "null") || Array(NUM_CH).fill(1);
+// ★ ProxyでpinModesの変更を全て追跡
+const _pinModesRaw = JSON.parse(localStorage.getItem("ana_pinModes")  || "null") || Array(NUM_CH).fill(1);
+const pinModes = new Proxy(_pinModesRaw, {
+  set(target, prop, value) {
+    if (!isNaN(prop) && target[prop] !== value) {
+      const stack = new Error().stack.split('\n').slice(1,4).map(s=>s.trim()).join(' | ');
+      console.log('[pinModes] ['+prop+'] '+target[prop]+' → '+value+' @ '+stack);
+      // log関数が定義済みならUIログにも出す
+      if (typeof log === 'function') log('🔍 pinModes['+prop+'] '+target[prop]+'→'+value);
+    }
+    target[prop] = value;
+    return true;
+  }
+});
 let swOnVals = JSON.parse(localStorage.getItem("ana_swOnVals")  || "null") || Array(NUM_CH).fill(1);
 let swOffVals= JSON.parse(localStorage.getItem("ana_swOffVals") || "null") || Array(NUM_CH).fill(0);
 let adcTxId  = localStorage.getItem("ana_adcTxId") || "500";
