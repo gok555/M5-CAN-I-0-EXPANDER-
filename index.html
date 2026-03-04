@@ -1732,7 +1732,22 @@ function log(msg) {
 // ════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════
+// ── 画面消灯防止 (Wake Lock API) ──
+let _wakeLock = null;
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+  } catch(e) {}
+}
+// 画面が再表示された時に再取得
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+
 window.addEventListener("load", () => {
+  requestWakeLock();  // 起動時に画面消灯防止を要求
   buildGaugeGrid();
   renderPinGrid();
   renderKeypad();
