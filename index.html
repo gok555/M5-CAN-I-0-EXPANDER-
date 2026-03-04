@@ -912,19 +912,13 @@ function parseMsg(msg) {
   }
   if (msg.startsWith("PIN_MODES=")) {
     const recvModes = msg.slice(10).split(',').map((v,i) => i<NUM_CH ? (parseInt(v)||0) : 0);
+    log('📥 PIN_MODES受信: ' + recvModes.join(','));
     if (_sentPinModes) {
-      // SET_ALL_PINS送信後のエコー: firmwareが送り返した値を確認ログ出力のみ
-      // 実際のpinModesは送信時に設定済みの値(_sentPinModes)を使う
       const match = _sentPinModes.every((v,i) => v === recvModes[i]);
-      log('📥 PIN_MODES確認: ' + (match ? '✅一致' : '⚠不一致 recv=' + recvModes.join(',') + ' sent=' + _sentPinModes.join(',')));
-      if (!match) {
-        // firmwareが異なる値を返した場合は送信値を採用してUIを保持
-        log('⚠ 送信値を優先します');
-      }
-      // pinModesは既に_sentPinModesの値が入っているのでapplyPinModesUIのみ
+      log('  確認: ' + (match ? '✅FW一致' : '⚠FW不一致 → 送信値優先'));
+      // pinModesは送信値で既に更新済み。上書きしない
       applyPinModesUI();
     } else {
-      // 通常時のPIN_MODES受信
       recvModes.forEach((v,i) => { if(i<NUM_CH) pinModes[i] = v; });
       localStorage.setItem("ana_pinModes", JSON.stringify(pinModes));
       applyPinModesUI();
@@ -1067,9 +1061,16 @@ function showRxIndicator(vals) {
   log('↙ CAN RX AUX: ' + (parts.length ? parts.join(' ') : JSON.stringify(vals)));
 }
 
+// ★ SETボタン押下時点のpinModesスナップショット
+//    confirmからexecuteまでの間に外部から上書きされても送信値を保護する
+let _confirmedPinModes = null;
+
 function confirmPinModeSet() {
+  // スナップショットを取る (ここが「ユーザーが意図した値」)
+  _confirmedPinModes = pinModes.slice();
+  log('📋 SETボタン押下時 pinModes: ' + _confirmedPinModes.join(','));
   const changes = [];
-  for (let i=0; i<NUM_CH; i++) changes.push('P'+i+':'+(pinModes[i]===1?'INPUT':'AUX'));
+  for (let i=0; i<NUM_CH; i++) changes.push('P'+i+':'+(_confirmedPinModes[i]===1?'INPUT':'AUX'));
   document.getElementById('cd-msg').innerHTML =
     'ピンモードを更新し、デバイスを再起動します。<br>' +
     '<span style="font-size:0.75rem;color:#aaa;">' + changes.join('  ') + '</span><br><br>よろしいですか？';
@@ -1083,14 +1084,18 @@ let _sentPinModes = null;
 
 async function executePinModeSet() {
   closeConfirm();
-  const modeStr = pinModes.join(',');
-  // 送信前に意図する値をlocalStorageと_sentPinModesに保存
-  _sentPinModes = pinModes.slice();  // コピー保存
-  localStorage.setItem('ana_pinModes', JSON.stringify(pinModes));
-  log('📤 SET_ALL_PINS送信: ' + modeStr);
+  // ★ pinModes直接ではなく_confirmedPinModes(SETボタン押下時のスナップショット)を使用
+  //    confirmからexecuteの間にBLE通知でpinModesが上書きされても安全
+  const modesAtSend = (_confirmedPinModes || pinModes).slice();
+  // pinModes本体も確実に同期
+  modesAtSend.forEach((v,i) => { pinModes[i] = v; });
+  const modeStr = modesAtSend.join(',');
+  _sentPinModes = modesAtSend;
+  localStorage.setItem('ana_pinModes', JSON.stringify(modesAtSend));
+  log('📤 送信直前 pinModes: ' + modeStr);
   await send('SET_ALL_PINS=' + modeStr);
   log('✅ BLE書込み完了 - RESTARTING待機中...');
-  // showRestartingOverlayはRESTARTINGメッセージ受信時のみ呼ばれる
+  _confirmedPinModes = null;
 }
 
 // ★ machine.reset()でBLEは自然に切断される
@@ -1264,6 +1269,7 @@ function renderPinGrid() {
 
 function togglePin(i) {
   pinModes[i] = pinModes[i]===1 ? 0 : 1;
+  log('🔘 P' + i + ' → ' + (pinModes[i]===1?'INPUT':'AUX') + ' | 全: ' + pinModes.join(','));
   applyPinModesUI();
 }
 
