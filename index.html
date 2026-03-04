@@ -813,6 +813,8 @@ async function startConnect() {
 // ★ 修正①: settingsビュー例外を削除 → 常にコネクト画面へ
 //           再起動オーバーレイが表示中なら閉じてから遷移
 function onDisconnected() {
+  // フォールバックタイマーをキャンセル(正常な切断イベントで処理するため)
+  if (_restartFallbackTimer) { clearTimeout(_restartFallbackTimer); _restartFallbackTimer = null; }
   setConnected(false);
   document.getElementById('restart-overlay').classList.remove('show');
   document.getElementById("connect-overlay").style.display = "flex";
@@ -1062,30 +1064,25 @@ async function executePinModeSet() {
   // ★ await で BLE書き込み完了を保証してからオーバーレイ表示
   await send('SET_ALL_PINS=' + modeStr);
   log('→ SET_ALL_PINS=' + modeStr + ' (再起動待ち)');
-  // showRestartingOverlay は RESTARTING メッセージ受信時に呼ぶ(二重呼び出し防止)
-  // フォールバック: 3秒待って RESTARTING が来なかった場合のみ
-  setTimeout(() => { if (!_restartingShown) showRestartingOverlay(); }, 3000);
+  // RESTARTINGメッセージ受信時にshowRestartingOverlayが呼ばれる
+  // ここでは何もしない(フォールバックタイマーは二重表示の原因になるため削除)
 }
 
-// ★ 二重呼び出し防止フラグ
-let _restartingShown = false;
+// ★ machine.reset()でBLEは自然に切断される
+//    JSからdisconnect()を呼ぶと切断イベントが二重発火するので呼ばない
+//    onDisconnected()がgattserverdisconnectedを受けてコネクト画面に遷移する
+let _restartFallbackTimer = null;
 
 function showRestartingOverlay() {
-  if (_restartingShown) return;  // 二重呼び出し防止
-  _restartingShown = true;
   document.getElementById('restart-overlay').classList.add('show');
-  // 2秒後にBLE強制切断 → onDisconnected() 経由でコネクト画面表示
-  setTimeout(() => {
-    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
-      bleDevice.gatt.disconnect();
-    } else {
-      // 既に切断済みのフォールバック
-      document.getElementById('restart-overlay').classList.remove('show');
-      setConnected(false);
-      document.getElementById("connect-overlay").style.display = "flex";
-    }
-    _restartingShown = false;  // 次回のためにリセット
-  }, 2000);
+  // 安全フォールバック: 15秒待っても切断されない場合のみ強制遷移
+  if (_restartFallbackTimer) clearTimeout(_restartFallbackTimer);
+  _restartFallbackTimer = setTimeout(() => {
+    _restartFallbackTimer = null;
+    document.getElementById('restart-overlay').classList.remove('show');
+    setConnected(false);
+    document.getElementById("connect-overlay").style.display = "flex";
+  }, 15000);
 }
 
 function setAuxMode(v) {
